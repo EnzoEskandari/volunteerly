@@ -56,6 +56,8 @@ export const students: Student[] = [
     onboardingComplete: true,
     totalVerifiedHours: 38,
     volunteerStreakWeeks: 4,
+    membershipActive: true,
+    membershipExpiresAt: "2027-03-14",
   },
   {
     id: "stu_2",
@@ -79,6 +81,7 @@ export const students: Student[] = [
     onboardingComplete: true,
     totalVerifiedHours: 61,
     volunteerStreakWeeks: 1,
+    membershipActive: false,
   },
   {
     id: "stu_3",
@@ -102,6 +105,8 @@ export const students: Student[] = [
     onboardingComplete: true,
     totalVerifiedHours: 22,
     volunteerStreakWeeks: 2,
+    membershipActive: true,
+    membershipWaived: true,
   },
 ];
 

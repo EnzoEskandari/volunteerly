@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   Clock,
@@ -10,6 +11,8 @@ import {
   MapPin,
   FileText,
   Bell,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +23,7 @@ import { GoalsCard } from "@/components/dashboard/student/goals-card";
 import { ProgressChart } from "@/components/dashboard/student/progress-chart";
 import { AchievementsCard } from "@/components/dashboard/student/achievements-card";
 import { OpportunityCard } from "@/components/opportunities/opportunity-card";
+import { MembershipModal } from "@/components/membership/membership-modal";
 import { useAuth } from "@/lib/context/auth-context";
 import { useAppData } from "@/lib/context/data-context";
 import { recommendedOpportunities } from "@/lib/matching";
@@ -29,6 +33,7 @@ import type { Student } from "@/lib/types";
 export default function StudentDashboardPage() {
   const { currentUser } = useAuth();
   const student = currentUser as Student;
+  const [membershipModalOpen, setMembershipModalOpen] = useState(false);
   const {
     opportunities,
     registrations,
@@ -62,9 +67,12 @@ export default function StudentDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold text-navy-900">Welcome back, {student.fullName.split(" ")[0]}</h1>
-        <p className="mt-1 text-navy-500">Here's what's happening with your volunteer journey.</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-navy-900">Welcome back, {student.fullName.split(" ")[0]}</h1>
+          <p className="mt-1 text-navy-500">Here's what's happening with your volunteer journey.</p>
+        </div>
+        <MembershipStatusPill student={student} onManage={() => setMembershipModalOpen(true)} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -186,6 +194,38 @@ export default function StudentDashboardPage() {
           </Card>
         </div>
       </div>
+
+      <MembershipModal
+        open={membershipModalOpen}
+        onClose={() => setMembershipModalOpen(false)}
+        studentId={student.id}
+      />
     </div>
+  );
+}
+
+function MembershipStatusPill({ student, onManage }: { student: Student; onManage: () => void }) {
+  if (student.membershipActive) {
+    return (
+      <button
+        onClick={onManage}
+        className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+      >
+        <ShieldCheck className="h-3.5 w-3.5" />
+        {student.membershipWaived ? "Member (fee waived)" : "Member"}
+        {student.membershipExpiresAt && !student.membershipWaived && (
+          <span className="text-emerald-600/70">· renews {formatShortDate(student.membershipExpiresAt)}</span>
+        )}
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onManage}
+      className="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
+    >
+      <ShieldAlert className="h-3.5 w-3.5" />
+      Membership inactive — join opportunities require a membership
+    </button>
   );
 }

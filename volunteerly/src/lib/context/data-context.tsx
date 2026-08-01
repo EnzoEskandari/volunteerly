@@ -4,6 +4,9 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import * as seed from "@/lib/mock-data";
 import { genId, daysUntil } from "@/lib/utils";
 import { isEligible } from "@/lib/matching";
+import { isMockMode } from "@/lib/mode";
+import { MEMBERSHIP_PRICE_USD } from "@/lib/types";
+import * as db_ from "@/lib/supabase/queries";
 import type {
   Student,
   Organization,
@@ -22,6 +25,14 @@ import type {
 } from "@/lib/types";
 
 const STORAGE_KEY = "volunteerly_db_v1";
+const MOCK = isMockMode();
+
+interface PlatformStats {
+  students: number;
+  organizations: number;
+  opportunities: number;
+  verifiedHours: number;
+}
 
 interface DBShape {
   students: Student[];
@@ -37,6 +48,24 @@ interface DBShape {
   reports: Report[];
   announcements: Announcement[];
   qrTokens: QRToken[];
+}
+
+function emptyDB(): DBShape {
+  return {
+    students: [],
+    organizations: [],
+    admins: [],
+    opportunities: [],
+    registrations: [],
+    attendanceRecords: [],
+    verifiedHours: [],
+    goals: [],
+    studentAchievements: [],
+    notifications: [],
+    reports: [],
+    announcements: [],
+    qrTokens: [],
+  };
 }
 
 function seedDB(): DBShape {
@@ -57,14 +86,83 @@ function seedDB(): DBShape {
   };
 }
 
+/** Decorates rows fetched straight from Postgres with display fields that
+ *  live on joined tables (org name/logo), so the rest of the app never has
+ *  to know these were computed rather than stored. */
+function decorate(raw: DBShape): DBShape {
+  const orgsById = new Map(raw.organizations.map((o) => [o.id, o]));
+  return {
+    ...raw,
+    opportunities: raw.opportunities.map((o) => ({
+      ...o,
+      orgName: orgsById.get(o.orgId)?.name ?? "Organization",
+      orgLogoUrl: orgsById.get(o.orgId)?.logoUrl,
+    })),
+    verifiedHours: raw.verifiedHours.map((h) => ({
+      ...h,
+      orgName: orgsById.get(h.orgId)?.name ?? "Organization",
+    })),
+  };
+}
+
+async function fetchAllFromSupabase(): Promise<DBShape> {
+  const [
+    students,
+    organizations,
+    admins,
+    opportunities,
+    registrations,
+    attendanceRecords,
+    verifiedHours,
+    goals,
+    studentAchievements,
+    notifications,
+    reports,
+    announcements,
+    qrTokens,
+  ] = await Promise.all([
+    db_.fetchStudents(),
+    db_.fetchOrganizations(),
+    db_.fetchAdmins(),
+    db_.fetchOpportunities(),
+    db_.fetchRegistrations(),
+    db_.fetchAttendance(),
+    db_.fetchVerifiedHours(),
+    db_.fetchGoals(),
+    db_.fetchStudentAchievements(),
+    db_.fetchNotifications(),
+    db_.fetchReports(),
+    db_.fetchAnnouncements(),
+    db_.fetchQrTokens(),
+  ]);
+  return decorate({
+    students,
+    organizations,
+    admins,
+    opportunities,
+    registrations,
+    attendanceRecords,
+    verifiedHours,
+    goals,
+    studentAchievements,
+    notifications,
+    reports,
+    announcements,
+    qrTokens,
+  });
+}
+
 interface DataContextValue extends DBShape {
   achievementsCatalog: typeof seed.achievementsCatalog;
-  platformStats: typeof seed.platformStatsSeed;
+  platformStats: PlatformStats;
+  loading: boolean;
   resetDemoData: () => void;
+  refetch: () => void;
 
   // Students
   addStudent: (s: Student) => void;
   updateStudent: (id: string, patch: Partial<Student>) => void;
+  activateMembership: (studentId: string, waived?: boolean) => void;
   removeStudent: (id: string) => void;
 
   // Organizations
@@ -107,23 +205,53 @@ interface DataContextValue extends DBShape {
 
 const DataContext = createContext<DataContextValue | null>(null);
 
-export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [db, setDb] = useState<DBShape>(seedDB);
-  const [hydrated, setHydrated] = useState(false);
+/** Fire a Supabase write in the background without blocking the optimistic
+ *  local UI update above it. Errors are logged rather than thrown since the
+ *  local state has already moved on — see README for how to surface these
+ *  to the user (e.g. wiring in a toast) once you're ready to harden this. */
+function sync(label: string, fn: () => Promise<unknown>) {
+  if (MOCK) return;
+  fn().catch((err) => console.error(`[volunteerly] Supabase sync failed (${label}):`, err));
+}
 
-  // Hydrate from localStorage on mount (client only)
+export function DataProvider({ children }: { children: React.ReactNode }) {
+  const [db, setDb] = useState<DBShape>(MOCK ? seedDB : emptyDB);
+  const [platformStats, setPlatformStats] = useState<PlatformStats>(
+    MOCK ? seed.platformStatsSeed : { students: 0, organizations: 0, opportunities: 0, verifiedHours: 0 },
+  );
+  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(!MOCK);
+
+  const loadFromSupabase = () => {
+    if (MOCK) return;
+    setLoading(true);
+    Promise.all([fetchAllFromSupabase(), db_.fetchPlatformStats()])
+      .then(([fresh, stats]) => {
+        setDb(fresh);
+        setPlatformStats(stats);
+      })
+      .catch((err) => console.error("[volunteerly] Failed to load data from Supabase:", err))
+      .finally(() => setLoading(false));
+  };
+
+  // Hydrate on mount — from localStorage in mock mode, from Supabase otherwise
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setDb(JSON.parse(raw));
-    } catch {
-      // corrupt/blocked storage — fall back to seed data silently
+    if (MOCK) {
+      try {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) setDb(JSON.parse(raw));
+      } catch {
+        // corrupt/blocked storage — fall back to seed data silently
+      }
+      setHydrated(true);
+    } else {
+      loadFromSupabase();
     }
-    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!MOCK || !hydrated) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     } catch {
@@ -132,14 +260,36 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [db, hydrated]);
 
   const resetDemoData = () => {
+    if (!MOCK) return;
     window.localStorage.removeItem(STORAGE_KEY);
     setDb(seedDB());
   };
 
   // ── Students ─────────────────────────────────────────────────────────
   const addStudent = (s: Student) => setDb((d) => ({ ...d, students: [...d.students, s] }));
-  const updateStudent = (id: string, patch: Partial<Student>) =>
+  const updateStudent = (id: string, patch: Partial<Student>) => {
     setDb((d) => ({ ...d, students: d.students.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+    sync("updateStudent", () => db_.updateStudentRow(id, patch));
+  };
+
+  const activateMembership: DataContextValue["activateMembership"] = (studentId, waived = false) => {
+    const oneYearFromNow = new Date();
+    oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+    updateStudent(studentId, {
+      membershipActive: true,
+      membershipExpiresAt: oneYearFromNow.toISOString().slice(0, 10),
+      membershipWaived: waived,
+    });
+    pushNotification({
+      userId: studentId,
+      audience: "student",
+      type: "announcement",
+      title: waived ? "Fee waiver approved" : "Welcome to Volunteerly Membership",
+      body: waived
+        ? "Your membership fee has been waived. You now have full access to join opportunities and receive verified hours."
+        : `Your $${MEMBERSHIP_PRICE_USD}/year membership is active. You can now join opportunities, check in with QR codes, and receive verified hours.`,
+    });
+  };
 
   const removeStudent = (id: string) =>
     setDb((d) => ({
@@ -150,11 +300,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   // ── Organizations ────────────────────────────────────────────────────
   const addOrganization = (o: Organization) => setDb((d) => ({ ...d, organizations: [...d.organizations, o] }));
-  const updateOrganization = (id: string, patch: Partial<Organization>) =>
+  const updateOrganization = (id: string, patch: Partial<Organization>) => {
     setDb((d) => ({ ...d, organizations: d.organizations.map((o) => (o.id === id ? { ...o, ...patch } : o)) }));
+    sync("updateOrganization", () => db_.updateOrganizationRow(id, patch));
+  };
 
   const setOrgApproval = (id: string, status: OrgApprovalStatus, reason?: string) => {
     updateOrganization(id, { approvalStatus: status, rejectionReason: reason });
+    sync("setOrgApproval", () => db_.setOrgApprovalRow(id, status, reason));
     pushNotification({
       userId: id,
       audience: "organization",
@@ -176,19 +329,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       used: false,
     };
     setDb((d) => ({ ...d, opportunities: [o, ...d.opportunities], qrTokens: [...d.qrTokens, qrToken] }));
+    sync("createOpportunity", async () => {
+      await db_.insertOpportunity(o);
+      await db_.upsertQrToken(qrToken);
+    });
   };
 
-  const updateOpportunity = (id: string, patch: Partial<VolunteerOpportunity>) =>
+  const updateOpportunity = (id: string, patch: Partial<VolunteerOpportunity>) => {
     setDb((d) => ({ ...d, opportunities: d.opportunities.map((o) => (o.id === id ? { ...o, ...patch } : o)) }));
+    sync("updateOpportunity", () => db_.updateOpportunityRow(id, patch));
+  };
 
-  const deleteOpportunity = (id: string) =>
+  const deleteOpportunity = (id: string) => {
     setDb((d) => ({ ...d, opportunities: d.opportunities.filter((o) => o.id !== id) }));
+    sync("deleteOpportunity", () => db_.deleteOpportunityRow(id));
+  };
 
   // ── Registration / join flow ────────────────────────────────────────
   const joinOpportunity = (studentId: string, opportunityId: string) => {
     const opp = db.opportunities.find((o) => o.id === opportunityId);
     const student = db.students.find((s) => s.id === studentId);
     if (!opp || !student) return { ok: false, reason: "Opportunity or student not found." };
+
+    if (!student.membershipActive) return { ok: false, reason: "membership-required" };
 
     const already = db.registrations.some(
       (r) => r.studentId === studentId && r.opportunityId === opportunityId && r.status !== "cancelled",
@@ -219,6 +382,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           : o,
       ),
     }));
+    sync("joinOpportunity", async () => {
+      await db_.insertRegistration(reg);
+      await db_.updateOpportunityRow(opportunityId, {
+        currentVolunteers: opp.currentVolunteers + 1,
+        status: opp.currentVolunteers + 1 >= opp.maxVolunteers ? "full" : opp.status,
+      });
+    });
 
     pushNotification({
       userId: opp.orgId,
@@ -235,6 +405,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const cancelRegistration = (registrationId: string) => {
     const reg = db.registrations.find((r) => r.id === registrationId);
     if (!reg) return;
+    const opp = db.opportunities.find((o) => o.id === reg.opportunityId);
     setDb((d) => ({
       ...d,
       registrations: d.registrations.map((r) => (r.id === registrationId ? { ...r, status: "cancelled" } : r)),
@@ -244,6 +415,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           : o,
       ),
     }));
+    sync("cancelRegistration", async () => {
+      await db_.updateRegistrationRow(registrationId, { status: "cancelled" });
+      if (opp) {
+        await db_.updateOpportunityRow(opp.id, {
+          currentVolunteers: Math.max(0, opp.currentVolunteers - 1),
+          status: "open",
+        });
+      }
+    });
   };
 
   // ── QR check-in ──────────────────────────────────────────────────────
@@ -279,6 +459,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       registrations: d.registrations.map((r) => (r.id === reg.id ? { ...r, status: "attended" } : r)),
       qrTokens: d.qrTokens.map((q) => (q.token === token ? { ...q, used: true } : q)),
     }));
+    sync("checkIn", async () => {
+      await db_.insertAttendanceRow(record);
+      await db_.updateRegistrationRow(reg.id, { status: "attended" });
+      await db_.markQrTokenUsed(token);
+    });
 
     const opp = db.opportunities.find((o) => o.id === qr.opportunityId);
     const student = db.students.find((s) => s.id === studentId);
@@ -298,6 +483,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // ── Hour verification ───────────────────────────────────────────────
   const verifyHours: DataContextValue["verifyHours"] = (input) => {
     const org = db.organizations.find((o) => o.id === input.orgId);
+    const student = db.students.find((s) => s.id === input.studentId);
     const record: VerifiedHours = {
       ...input,
       id: genId("vh"),
@@ -313,6 +499,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         s.id === input.studentId ? { ...s, totalVerifiedHours: s.totalVerifiedHours + input.hours } : s,
       ),
     }));
+    sync("verifyHours", async () => {
+      const { orgName, verifiedBadge, ...row } = record;
+      await db_.insertVerifiedHoursRow(row);
+      if (student) {
+        await db_.updateStudentRow(input.studentId, { totalVerifiedHours: student.totalVerifiedHours + input.hours });
+      }
+    });
 
     pushNotification({
       userId: input.studentId,
@@ -327,22 +520,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ── Goals ────────────────────────────────────────────────────────────
-  const createGoal = (g: Goal) => setDb((d) => ({ ...d, goals: [...d.goals, g] }));
-  const updateGoal = (id: string, patch: Partial<Goal>) =>
+  const createGoal = (g: Goal) => {
+    setDb((d) => ({ ...d, goals: [...d.goals, g] }));
+    sync("createGoal", () => db_.insertGoalRow(g));
+  };
+  const updateGoal = (id: string, patch: Partial<Goal>) => {
     setDb((d) => ({ ...d, goals: d.goals.map((g) => (g.id === id ? { ...g, ...patch } : g)) }));
-  const deleteGoal = (id: string) => setDb((d) => ({ ...d, goals: d.goals.filter((g) => g.id !== id) }));
+    sync("updateGoal", () => db_.updateGoalRow(id, patch));
+  };
+  const deleteGoal = (id: string) => {
+    setDb((d) => ({ ...d, goals: d.goals.filter((g) => g.id !== id) }));
+    sync("deleteGoal", () => db_.deleteGoalRow(id));
+  };
 
   // ── Notifications ────────────────────────────────────────────────────
-  const markNotificationRead = (id: string) =>
+  const markNotificationRead = (id: string) => {
     setDb((d) => ({ ...d, notifications: d.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)) }));
+    sync("markNotificationRead", () => db_.markNotificationReadRow(id));
+  };
 
-  const markAllNotificationsRead = (userId: string) =>
+  const markAllNotificationsRead = (userId: string) => {
     setDb((d) => ({
       ...d,
       notifications: d.notifications.map((n) => (n.userId === userId ? { ...n, read: true } : n)),
     }));
+    sync("markAllNotificationsRead", () => db_.markAllNotificationsReadRow(userId));
+  };
 
-  const pushNotification: DataContextValue["pushNotification"] = (n) =>
+  const pushNotification: DataContextValue["pushNotification"] = (n) => {
     setDb((d) => ({
       ...d,
       notifications: [
@@ -350,29 +555,43 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         ...d.notifications,
       ],
     }));
+    sync("pushNotification", () => db_.insertNotificationRow(n));
+  };
 
   // ── Announcements ────────────────────────────────────────────────────
-  const postAnnouncement: DataContextValue["postAnnouncement"] = (a) =>
-    setDb((d) => ({ ...d, announcements: [{ ...a, id: genId("ann"), createdAt: new Date().toISOString() }, ...d.announcements] }));
+  const postAnnouncement: DataContextValue["postAnnouncement"] = (a) => {
+    setDb((d) => ({
+      ...d,
+      announcements: [{ ...a, id: genId("ann"), createdAt: new Date().toISOString() }, ...d.announcements],
+    }));
+    sync("postAnnouncement", () => db_.insertAnnouncementRow(a));
+  };
 
   // ── Reports / moderation ────────────────────────────────────────────
-  const submitReport: DataContextValue["submitReport"] = (r) =>
+  const submitReport: DataContextValue["submitReport"] = (r) => {
     setDb((d) => ({
       ...d,
       reports: [{ ...r, id: genId("report"), createdAt: new Date().toISOString(), status: "open" }, ...d.reports],
     }));
+    sync("submitReport", () => db_.insertReportRow(r));
+  };
 
-  const updateReportStatus = (id: string, status: Report["status"]) =>
+  const updateReportStatus = (id: string, status: Report["status"]) => {
     setDb((d) => ({ ...d, reports: d.reports.map((r) => (r.id === id ? { ...r, status } : r)) }));
+    sync("updateReportStatus", () => db_.updateReportStatusRow(id, status));
+  };
 
   const value = useMemo<DataContextValue>(
     () => ({
       ...db,
       achievementsCatalog: seed.achievementsCatalog,
-      platformStats: seed.platformStatsSeed,
+      platformStats,
+      loading,
       resetDemoData,
+      refetch: loadFromSupabase,
       addStudent,
       updateStudent,
+      activateMembership,
       removeStudent,
       addOrganization,
       updateOrganization,
@@ -395,7 +614,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       updateReportStatus,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [db],
+    [db, loading, platformStats],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

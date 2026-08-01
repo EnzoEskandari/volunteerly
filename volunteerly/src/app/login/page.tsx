@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { useAuth } from "@/lib/context/auth-context";
 import { dashboardPathForRole } from "@/lib/routes";
+import { isMockMode } from "@/lib/mode";
 import { CURRENT_STUDENT_ID, CURRENT_ORG_ID, CURRENT_ADMIN_ID } from "@/lib/mock-data";
 
 export default function LoginPage() {
@@ -23,17 +24,20 @@ function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = loginWithEmail(email);
+    setError(null);
+    setLoading(true);
+    const result = await loginWithEmail(email, password);
+    setLoading(false);
     if (!result.ok) {
       setError(result.reason ?? "Something went wrong.");
       return;
     }
-    // In production this reads the freshly created session directly;
-    // here we just push to the role-appropriate dashboard.
     router.push(params.get("redirectRole") ? dashboardPathForRole(params.get("redirectRole") as any) : "/");
   };
 
@@ -70,13 +74,20 @@ function LoginForm() {
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" required placeholder="••••••••" />
+              <Input
+                id="password"
+                type="password"
+                required
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
               <Link href="#" className="mt-1.5 inline-block text-xs font-medium text-brand hover:underline">
                 Forgot password?
               </Link>
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <Button type="submit" className="w-full group">
+            <Button type="submit" className="w-full group" loading={loading}>
               Log in
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
@@ -88,7 +99,7 @@ function LoginForm() {
             <div className="h-px flex-1 bg-navy-100" />
           </div>
 
-          <Button variant="outline" className="w-full" onClick={loginWithGoogle}>
+          <Button variant="outline" className="w-full" onClick={loginWithGoogle} type="button">
             <GoogleIcon />
             Continue with Google
           </Button>
@@ -100,29 +111,31 @@ function LoginForm() {
             </Link>
           </p>
 
-          <div className="mt-10 rounded-xl border border-dashed border-navy-200 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-navy-400">Try a demo account</p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <button
-                onClick={() => demoLogin(CURRENT_STUDENT_ID)}
-                className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
-              >
-                Student
-              </button>
-              <button
-                onClick={() => demoLogin(CURRENT_ORG_ID)}
-                className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
-              >
-                Nonprofit
-              </button>
-              <button
-                onClick={() => demoLogin(CURRENT_ADMIN_ID)}
-                className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
-              >
-                Admin
-              </button>
+          {isMockMode() && (
+            <div className="mt-10 rounded-xl border border-dashed border-navy-200 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-navy-400">Try a demo account</p>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => demoLogin(CURRENT_STUDENT_ID)}
+                  className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
+                >
+                  Student
+                </button>
+                <button
+                  onClick={() => demoLogin(CURRENT_ORG_ID)}
+                  className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
+                >
+                  Nonprofit
+                </button>
+                <button
+                  onClick={() => demoLogin(CURRENT_ADMIN_ID)}
+                  className="rounded-lg border border-navy-100 px-2 py-2 text-xs font-medium text-navy-700 hover:bg-navy-50"
+                >
+                  Admin
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

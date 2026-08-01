@@ -4,31 +4,33 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppData } from "./data-context";
 import { genId } from "@/lib/utils";
+import { isMockMode } from "@/lib/mode";
+import { createClient } from "@/lib/supabase/client";
+import { createStudentProfile, createOrganizationProfile } from "@/lib/supabase/queries";
 import type { AnyUser, Student, Organization } from "@/lib/types";
 
 const SESSION_KEY = "volunteerly_session_v1";
+const MOCK = isMockMode();
+
+type AuthResult = { ok: boolean; reason?: string; needsEmailConfirmation?: boolean };
 
 interface AuthContextValue {
   currentUser: AnyUser | null;
   loading: boolean;
-  /**
-   * Mock sign-in. In production this becomes:
-   *   await supabase.auth.signInWithPassword({ email, password })
-   * Here we just look the email up across students/organizations/admins,
-   * since password verification requires a real auth backend.
-   */
-  loginWithEmail: (email: string) => { ok: boolean; reason?: string };
+  loginWithEmail: (email: string, password?: string) => Promise<AuthResult>;
   loginAsDemo: (userId: string) => void;
   loginWithGoogle: () => void;
-  registerStudent: (input: { fullName: string; email: string; age?: number }) => void;
+  registerStudent: (input: { fullName: string; email: string; password: string; age?: number }) => Promise<AuthResult>;
   registerOrganization: (input: {
     name: string;
     email: string;
+    password: string;
     ein: string;
     website?: string;
     contactName: string;
     category: string[];
-  }) => void;
+    description?: string;
+  }) => Promise<AuthResult>;
   logout: () => void;
 }
 
@@ -39,78 +41,110 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AnyUser | null>(null);
   const [loading, setLoading] = useState(true);
+  // The authenticated user's id, resolved separately from the actual profile
+  // object — the profile itself only becomes available once data-context has
+  // finished fetching, which can happen a beat after auth resolves.
+  const [activeUserId, setActiveUserId] = useState<string | null>(null);
 
+  // ── Resolve who's logged in ──────────────────────────────────────────
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const { id } = JSON.parse(raw);
-        const found =
-          data.students.find((s) => s.id === id) ??
-          data.organizations.find((o) => o.id === id) ??
-          data.admins.find((a) => a.id === id) ??
-          null;
-        setCurrentUser(found as AnyUser | null);
+    if (MOCK) {
+      try {
+        const raw = window.localStorage.getItem(SESSION_KEY);
+        if (raw) setActiveUserId(JSON.parse(raw).id);
+      } catch {
+        // ignore corrupt session
       }
-    } catch {
-      // ignore corrupt session
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setActiveUserId(session?.user.id ?? null);
+      setLoading(false);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setActiveUserId(session?.user.id ?? null);
+      if (session?.user.id) data.refetch();
+    });
+
+    return () => sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep currentUser fresh as the underlying record changes (e.g. profile edits)
+  // Once we know *who*, look their profile up in whatever data-context has
+  // loaded (localStorage in mock mode, Supabase everywhere else).
   useEffect(() => {
-    if (!currentUser) return;
-    const fresh =
-      data.students.find((s) => s.id === currentUser.id) ??
-      data.organizations.find((o) => o.id === currentUser.id) ??
-      data.admins.find((a) => a.id === currentUser.id) ??
-      null;
-    if (fresh && JSON.stringify(fresh) !== JSON.stringify(currentUser)) {
-      setCurrentUser(fresh as AnyUser);
+    if (!activeUserId) {
+      setCurrentUser(null);
+      return;
     }
+    const found =
+      data.students.find((s) => s.id === activeUserId) ??
+      data.organizations.find((o) => o.id === activeUserId) ??
+      data.admins.find((a) => a.id === activeUserId) ??
+      null;
+    setCurrentUser(found as AnyUser | null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.students, data.organizations, data.admins]);
+  }, [activeUserId, data.students, data.organizations, data.admins]);
 
-  const persistSession = (user: AnyUser) => {
-    setCurrentUser(user);
+  const persistMockSession = (user: AnyUser) => {
     window.localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id, role: user.role }));
+    setActiveUserId(user.id);
   };
 
-  const loginWithEmail: AuthContextValue["loginWithEmail"] = (email) => {
-    const normalized = email.trim().toLowerCase();
-    const found =
-      data.students.find((s) => s.email.toLowerCase() === normalized) ??
-      data.organizations.find((o) => o.email.toLowerCase() === normalized) ??
-      data.admins.find((a) => a.email.toLowerCase() === normalized);
-    if (!found) return { ok: false, reason: "No account found with that email. Try registering instead." };
-    persistSession(found as AnyUser);
+  // ── Login ─────────────────────────────────────────────────────────────
+  const loginWithEmail: AuthContextValue["loginWithEmail"] = async (email, password) => {
+    if (MOCK) {
+      const normalized = email.trim().toLowerCase();
+      const found =
+        data.students.find((s) => s.email.toLowerCase() === normalized) ??
+        data.organizations.find((o) => o.email.toLowerCase() === normalized) ??
+        data.admins.find((a) => a.email.toLowerCase() === normalized);
+      if (!found) return { ok: false, reason: "No account found with that email. Try registering instead." };
+      persistMockSession(found as AnyUser);
+      return { ok: true };
+    }
+
+    const supabase = createClient();
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: password ?? "",
+    });
+    if (error) return { ok: false, reason: error.message };
+    setActiveUserId(signInData.user.id);
+    data.refetch();
     return { ok: true };
   };
 
   const loginAsDemo = (userId: string) => {
+    if (!MOCK) return; // demo accounts only make sense against local mock data
     const found =
       data.students.find((s) => s.id === userId) ??
       data.organizations.find((o) => o.id === userId) ??
       data.admins.find((a) => a.id === userId);
-    if (found) persistSession(found as AnyUser);
+    if (found) persistMockSession(found as AnyUser);
   };
 
   const loginWithGoogle = () => {
-    // Production implementation:
-    //   await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo } })
-    // Mock mode signs in the seeded demo student so the flow is explorable end to end.
-    loginAsDemo("stu_1");
+    if (MOCK) {
+      loginAsDemo("stu_1");
+      return;
+    }
+    const supabase = createClient();
+    supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
   };
 
-  const registerStudent: AuthContextValue["registerStudent"] = ({ fullName, email, age }) => {
-    const student: Student = {
-      id: genId("stu"),
-      email,
-      role: "student",
-      createdAt: new Date().toISOString(),
+  // ── Registration ──────────────────────────────────────────────────────
+  const registerStudent: AuthContextValue["registerStudent"] = async ({ fullName, email, password, age }) => {
+    const base: Omit<Student, "id" | "email" | "role" | "createdAt"> = {
       fullName,
+      age,
       interests: [],
       skills: [],
       languages: [],
@@ -122,41 +156,99 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       onboardingComplete: false,
       totalVerifiedHours: 0,
       volunteerStreakWeeks: 0,
-      age,
+      membershipActive: false,
     };
+
+    if (MOCK) {
+      const student: Student = { id: genId("stu"), email, role: "student", createdAt: new Date().toISOString(), ...base };
+      data.addStudent(student);
+      persistMockSession(student);
+      router.push("/onboarding");
+      return { ok: true };
+    }
+
+    const supabase = createClient();
+    const { data: signUpData, error } = await supabase.auth.signUp({ email, password });
+    if (error) return { ok: false, reason: error.message };
+    const userId = signUpData.user?.id;
+    if (!userId) return { ok: false, reason: "Something went wrong creating your account." };
+
+    try {
+      await createStudentProfile(userId, email, base);
+    } catch (e: any) {
+      return { ok: false, reason: e.message ?? "Couldn't finish setting up your profile." };
+    }
+
+    const student: Student = { id: userId, email, role: "student", createdAt: new Date().toISOString(), ...base };
     data.addStudent(student);
-    persistSession(student);
+
+    if (!signUpData.session) {
+      return { ok: true, needsEmailConfirmation: true };
+    }
+    setActiveUserId(userId);
     router.push("/onboarding");
+    return { ok: true };
   };
 
-  const registerOrganization: AuthContextValue["registerOrganization"] = ({
+  const registerOrganization: AuthContextValue["registerOrganization"] = async ({
     name,
     email,
+    password,
     ein,
     website,
     contactName,
     category,
+    description,
   }) => {
-    const org: Organization = {
-      id: genId("org"),
-      email,
-      role: "organization",
-      createdAt: new Date().toISOString(),
+    const base: Omit<Organization, "id" | "email" | "role" | "createdAt"> = {
       name,
       ein,
       website,
       contactName,
+      description,
       category: category as Organization["category"],
       approvalStatus: "pending",
     };
+
+    if (MOCK) {
+      const org: Organization = { id: genId("org"), email, role: "organization", createdAt: new Date().toISOString(), ...base };
+      data.addOrganization(org);
+      persistMockSession(org);
+      router.push("/dashboard/nonprofit?justRegistered=1");
+      return { ok: true };
+    }
+
+    const supabase = createClient();
+    const { data: signUpData, error } = await supabase.auth.signUp({ email, password });
+    if (error) return { ok: false, reason: error.message };
+    const userId = signUpData.user?.id;
+    if (!userId) return { ok: false, reason: "Something went wrong creating your account." };
+
+    try {
+      await createOrganizationProfile(userId, email, base);
+    } catch (e: any) {
+      return { ok: false, reason: e.message ?? "Couldn't finish setting up your organization." };
+    }
+
+    const org: Organization = { id: userId, email, role: "organization", createdAt: new Date().toISOString(), ...base };
     data.addOrganization(org);
-    persistSession(org);
+
+    if (!signUpData.session) {
+      return { ok: true, needsEmailConfirmation: true };
+    }
+    setActiveUserId(userId);
     router.push("/dashboard/nonprofit?justRegistered=1");
+    return { ok: true };
   };
 
   const logout = () => {
     setCurrentUser(null);
-    window.localStorage.removeItem(SESSION_KEY);
+    setActiveUserId(null);
+    if (MOCK) {
+      window.localStorage.removeItem(SESSION_KEY);
+    } else {
+      createClient().auth.signOut();
+    }
     router.push("/");
   };
 

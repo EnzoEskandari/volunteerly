@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProgressBar } from "@/components/ui/progress";
 import { MapEmbed } from "@/components/opportunities/map-embed";
+import { MembershipModal } from "@/components/membership/membership-modal";
 import { useAppData } from "@/lib/context/data-context";
 import { useAuth } from "@/lib/context/auth-context";
 import { useToast } from "@/components/ui/toast";
@@ -36,6 +37,7 @@ export default function OpportunityDetailPage() {
 
   const opp = opportunities.find((o) => o.id === params.id);
   const [busy, setBusy] = useState(false);
+  const [membershipModalOpen, setMembershipModalOpen] = useState(false);
 
   if (!opp) {
     return (
@@ -73,6 +75,8 @@ export default function OpportunityDetailPage() {
     setBusy(false);
     if (result.ok) {
       showToast("You're registered! The organization has been notified.");
+    } else if (result.reason === "membership-required") {
+      setMembershipModalOpen(true);
     } else {
       showToast(result.reason ?? "Couldn't join this event.", "error");
     }
@@ -202,6 +206,17 @@ export default function OpportunityDetailPage() {
         </div>
       </main>
       <Footer />
+      {student && (
+        <MembershipModal
+          open={membershipModalOpen}
+          onClose={() => setMembershipModalOpen(false)}
+          studentId={student.id}
+          onActivated={() => {
+            const result = joinOpportunity(student.id, opp.id);
+            if (result.ok) showToast("You're registered! The organization has been notified.");
+          }}
+        />
+      )}
     </>
   );
 }

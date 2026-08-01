@@ -15,6 +15,7 @@ const columns = [
     title: "Students",
     links: [
       { href: "/register", label: "Create an Account" },
+      { href: "/#pricing", label: "Membership Pricing" },
       { href: "/dashboard/student/transcript", label: "Service Transcript" },
       { href: "/#faq", label: "FAQ" },
     ],

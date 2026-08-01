@@ -67,7 +67,12 @@ export interface Student extends BaseUser {
   onboardingComplete: boolean;
   totalVerifiedHours: number;
   volunteerStreakWeeks: number;
+  membershipActive: boolean;
+  membershipExpiresAt?: string;
+  membershipWaived?: boolean; // fee-waiver program (need-based)
 }
+
+export const MEMBERSHIP_PRICE_USD = 5;
 
 export type OrgApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 

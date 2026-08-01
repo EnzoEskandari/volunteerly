@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { HeartHandshake, GraduationCap, Building2 } from "lucide-react";
+import { HeartHandshake, GraduationCap, Building2, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { useAuth } from "@/lib/context/auth-context";
@@ -77,16 +77,44 @@ function RegisterForm() {
   );
 }
 
+function CheckEmailNotice({ email }: { email: string }) {
+  return (
+    <div className="rounded-xl border border-brand-100 bg-brand-50 p-5 text-center">
+      <MailCheck className="mx-auto h-8 w-8 text-brand" />
+      <p className="mt-3 font-display text-base font-semibold text-navy-900">Check your email</p>
+      <p className="mt-1.5 text-sm text-navy-600">
+        We sent a confirmation link to <span className="font-medium">{email}</span>. Click it, then come back and log
+        in.
+      </p>
+    </div>
+  );
+}
+
 function StudentRegisterForm() {
   const { registerStudent } = useAuth();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [age, setAge] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    registerStudent({ fullName, email, age: age ? Number(age) : undefined });
+    setError(null);
+    setLoading(true);
+    const result = await registerStudent({ fullName, email, password });
+    setLoading(false);
+    if (!result.ok) {
+      setError(result.reason ?? "Something went wrong. Please try again.");
+      return;
+    }
+    if (result.needsEmailConfirmation) {
+      setConfirmEmail(email);
+    }
   };
+
+  if (confirmEmail) return <CheckEmailNotice email={confirmEmail} />;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -105,17 +133,20 @@ function StudentRegisterForm() {
           placeholder="you@student.edu"
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="age">Age</Label>
-          <Input id="age" type="number" min={13} max={19} value={age} onChange={(e) => setAge(e.target.value)} placeholder="16" />
-        </div>
-        <div>
-          <Label htmlFor="password">Password</Label>
-          <Input id="password" type="password" required placeholder="••••••••" />
-        </div>
+      <div>
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          type="password"
+          required
+          minLength={6}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="At least 6 characters"
+        />
       </div>
-      <Button type="submit" className="w-full">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <Button type="submit" className="w-full" loading={loading}>
         Create student account
       </Button>
       <p className="text-center text-xs text-navy-400">Next, we'll ask a few quick questions to personalize your matches.</p>
@@ -127,19 +158,44 @@ function OrganizationRegisterForm() {
   const { registerOrganization } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [ein, setEin] = useState("");
   const [website, setWebsite] = useState("");
   const [contactName, setContactName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState<CauseCategory[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null);
 
   const toggleCategory = (c: CauseCategory) =>
     setCategory((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    registerOrganization({ name, email, ein, website: website || undefined, contactName, category });
+    setError(null);
+    setLoading(true);
+    const result = await registerOrganization({
+      name,
+      email,
+      password,
+      ein,
+      website: website || undefined,
+      contactName,
+      category,
+      description: description || undefined,
+    });
+    setLoading(false);
+    if (!result.ok) {
+      setError(result.reason ?? "Something went wrong. Please try again.");
+      return;
+    }
+    if (result.needsEmailConfirmation) {
+      setConfirmEmail(email);
+    }
   };
+
+  if (confirmEmail) return <CheckEmailNotice email={confirmEmail} />;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -160,6 +216,18 @@ function OrganizationRegisterForm() {
           <Label htmlFor="ein">Tax ID / EIN</Label>
           <Input id="ein" required value={ein} onChange={(e) => setEin(e.target.value)} placeholder="94-3021847" />
         </div>
+      </div>
+      <div>
+        <Label htmlFor="orgPassword">Password</Label>
+        <Input
+          id="orgPassword"
+          type="password"
+          required
+          minLength={6}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="At least 6 characters"
+        />
       </div>
       <div>
         <Label htmlFor="website">Website (optional)</Label>
@@ -193,7 +261,8 @@ function OrganizationRegisterForm() {
         Your registration will be reviewed by a Volunteerly administrator before you can publish opportunities or
         verify hours — usually within 1–2 business days.
       </div>
-      <Button type="submit" className="w-full">
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <Button type="submit" className="w-full" loading={loading}>
         Submit for approval
       </Button>
     </form>

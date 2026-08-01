@@ -10,6 +10,7 @@ import { dashboardPathForRole } from "@/lib/routes";
 const links = [
   { href: "/opportunities", label: "Browse Opportunities" },
   { href: "/#how-it-works", label: "How It Works" },
+  { href: "/#pricing", label: "Pricing" },
   { href: "/#organizations", label: "For Organizations" },
   { href: "/#faq", label: "FAQ" },
 ];

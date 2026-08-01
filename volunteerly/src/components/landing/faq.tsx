@@ -7,7 +7,11 @@ import { cn } from "@/lib/utils";
 const faqs = [
   {
     q: "Is Volunteerly free for students?",
-    a: "Yes. Creating a student account, browsing opportunities, joining events, and receiving verified hours are always free.",
+    a: "Creating an account and browsing opportunities is always free. Joining events, checking in with a QR code, and receiving verified hours require a Volunteerly membership — $5/year to start, less than 42¢/month. Fee waivers are available for students who qualify for free or reduced-price lunch or a similar need-based program.",
+  },
+  {
+    q: "Why do students pay but organizations don't?",
+    a: "Nonprofits are the opportunities that make Volunteerly worth using, so keeping that side completely free maximizes what students see. The small student membership is what funds the platform instead — it's a lot like paying for a streaming service where the creators post for free and the audience covers the cost.",
   },
   {
     q: "How does hour verification actually work?",

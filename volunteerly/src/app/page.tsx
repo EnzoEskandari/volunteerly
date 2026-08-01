@@ -4,7 +4,7 @@ import { Hero } from "@/components/landing/hero";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { Benefits } from "@/components/landing/benefits";
 import { Stats } from "@/components/landing/stats";
-import { Testimonials } from "@/components/landing/testimonials";
+import { Pricing } from "@/components/landing/pricing";
 import { FAQ } from "@/components/landing/faq";
 import { CTA } from "@/components/landing/cta";
 
@@ -17,7 +17,7 @@ export default function HomePage() {
         <Stats />
         <HowItWorks />
         <Benefits />
-        <Testimonials />
+        <Pricing />
         <FAQ />
         <CTA />
       </main>

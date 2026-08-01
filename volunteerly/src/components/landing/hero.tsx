@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { ArrowRight, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar } from "@/components/ui/avatar";
-import { students } from "@/lib/mock-data";
 
 export function Hero() {
   return (
@@ -57,20 +55,6 @@ export function Hero() {
               </Button>
             </Link>
           </div>
-
-          <div
-            className="mt-10 flex animate-fade-up items-center gap-3"
-            style={{ animationDelay: "300ms" }}
-          >
-            <div className="flex -space-x-2.5">
-              {students.map((s) => (
-                <Avatar key={s.id} src={s.avatarUrl} name={s.fullName} size={36} className="ring-2 ring-navy-950" />
-              ))}
-            </div>
-            <p className="text-sm text-navy-300">
-              Joined by <span className="font-semibold text-white">128,000+</span> students nationwide
-            </p>
-          </div>
         </div>
 
         <div className="relative animate-fade-up" style={{ animationDelay: "180ms" }}>
@@ -86,30 +70,28 @@ function HeroPreviewCard() {
     <div className="relative mx-auto max-w-md rounded-2xl border border-white/10 bg-white p-5 shadow-card-hover lg:mx-0 lg:ml-auto">
       <div className="flex items-center justify-between border-b border-navy-100 pb-4">
         <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-navy-400">Service Transcript</p>
-          <p className="font-display text-lg font-semibold text-navy-900">Maya Chen</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-navy-400">Example Service Transcript</p>
+          <p className="font-display text-lg font-semibold text-navy-900">What yours could look like</p>
         </div>
         <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Verified</div>
       </div>
       <div className="mt-4 space-y-3">
         {[
-          { org: "Coastal Paws Animal Rescue", hours: "1.5 hrs", date: "Jul 16" },
-          { org: "Green Shoreline Initiative", hours: "2.5 hrs", date: "Jun 1" },
-          { org: "Foothill Food Bank", hours: "3 hrs", date: "May 18" },
+          { org: "A local animal shelter", hours: "1.5 hrs" },
+          { org: "A beach cleanup crew", hours: "2.5 hrs" },
+          { org: "A community food bank", hours: "3 hrs" },
         ].map((row) => (
           <div key={row.org} className="flex items-center justify-between rounded-xl bg-navy-50/70 px-3.5 py-3">
-            <div>
-              <p className="text-sm font-medium text-navy-900">{row.org}</p>
-              <p className="text-xs text-navy-400">{row.date}</p>
-            </div>
+            <p className="text-sm font-medium text-navy-900">{row.org}</p>
             <span className="text-sm font-semibold text-brand">{row.hours}</span>
           </div>
         ))}
       </div>
       <div className="mt-4 flex items-center justify-between rounded-xl bg-navy-900 px-4 py-3.5 text-white">
         <span className="text-sm font-medium">Total verified hours</span>
-        <span className="font-display text-xl font-bold">38.0</span>
+        <span className="font-display text-xl font-bold">7.0</span>
       </div>
+      <p className="mt-3 text-center text-xs text-navy-400">Illustrative example — your real transcript builds as you volunteer.</p>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/context/auth-context";
+import { useAppData } from "@/lib/context/data-context";
 import type { UserRole } from "@/lib/types";
 import { Loader2 } from "lucide-react";
 import { dashboardPathForRole } from "@/lib/routes";
@@ -17,8 +18,10 @@ import { dashboardPathForRole } from "@/lib/routes";
  * during SSR), the guard runs here instead, on mount, in the browser.
  */
 export function RequireRole({ role, children }: { role: UserRole; children: React.ReactNode }) {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
+  const { loading: dataLoading } = useAppData();
   const router = useRouter();
+  const loading = authLoading || dataLoading;
 
   useEffect(() => {
     if (loading) return;

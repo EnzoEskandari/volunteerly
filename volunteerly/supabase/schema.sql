@@ -43,7 +43,10 @@ create table students (
   transportation boolean not null default false,
   onboarding_complete boolean not null default false,
   total_verified_hours numeric not null default 0,
-  volunteer_streak_weeks int not null default 0
+  volunteer_streak_weeks int not null default 0,
+  membership_active boolean not null default false,
+  membership_expires_at date,
+  membership_waived boolean not null default false
 );
 
 create table organizations (
@@ -211,6 +214,9 @@ alter table verified_hours enable row level security;
 alter table goals enable row level security;
 alter table notifications enable row level security;
 alter table reports enable row level security;
+alter table qr_tokens enable row level security;
+alter table announcements enable row level security;
+alter table student_achievements enable row level security;
 
 -- Helper: current user's role
 create or replace function current_role_is(r user_role) returns boolean as $$
@@ -220,16 +226,22 @@ $$ language sql stable security definer;
 -- profiles: readable by owner + admins, editable by owner only
 create policy "profiles_select_own_or_admin" on profiles for select
   using (id = auth.uid() or current_role_is('admin'));
+create policy "profiles_insert_own" on profiles for insert
+  with check (id = auth.uid());
 create policy "profiles_update_own" on profiles for update
   using (id = auth.uid());
 
 -- students: student edits own row; orgs & admins can view (for roster views)
 create policy "students_select" on students for select using (true);
+create policy "students_insert_own" on students for insert
+  with check (id = auth.uid());
 create policy "students_update_own" on students for update using (id = auth.uid());
 
 -- organizations: public read of approved orgs; org edits own row; admin all
 create policy "orgs_select_approved_or_owner" on organizations for select
   using (approval_status = 'approved' or id = auth.uid() or current_role_is('admin'));
+create policy "orgs_insert_own" on organizations for insert
+  with check (id = auth.uid());
 create policy "orgs_update_own" on organizations for update using (id = auth.uid());
 create policy "orgs_admin_update" on organizations for update using (current_role_is('admin'));
 
@@ -265,6 +277,39 @@ create policy "hours_insert_org_only" on verified_hours for insert
 -- notifications: only the owner reads/updates their own
 create policy "notif_select_own" on notifications for select using (user_id = auth.uid());
 create policy "notif_update_own" on notifications for update using (user_id = auth.uid());
+
+-- attendance: visible to the student who checked in or the hosting org; the
+-- student's own device is what records the scan, so insert is student-driven
+create policy "attendance_select" on attendance_records for select
+  using (
+    student_id = auth.uid()
+    or exists (select 1 from volunteer_opportunities o where o.id = opportunity_id and o.org_id = auth.uid())
+  );
+create policy "attendance_insert_own" on attendance_records for insert
+  with check (student_id = auth.uid());
+
+-- qr_tokens: the token string itself is the access control (short-lived,
+-- single-use, unguessable) — students look one up by value to check in,
+-- so selecting is open, but only the hosting org can generate one
+create policy "qr_select_any" on qr_tokens for select using (true);
+create policy "qr_insert_own_org" on qr_tokens for insert
+  with check (exists (select 1 from volunteer_opportunities o where o.id = opportunity_id and o.org_id = auth.uid()));
+create policy "qr_update_authenticated" on qr_tokens for update using (auth.uid() is not null);
+
+-- notifications: only the owner reads/updates their own, but any signed-in
+-- user can create a notification *for* someone else (e.g. a student
+-- registering notifies the organization, not themselves)
+create policy "notif_select_own" on notifications for select using (user_id = auth.uid());
+create policy "notif_insert_any_authenticated" on notifications for insert with check (auth.uid() is not null);
+create policy "notif_update_own" on notifications for update using (user_id = auth.uid());
+
+-- announcements: publicly readable, only the posting org can create one
+create policy "announcements_select_any" on announcements for select using (true);
+create policy "announcements_insert_own_org" on announcements for insert with check (org_id = auth.uid());
+
+-- student_achievements: a student can view and unlock their own
+create policy "student_achievements_select_own" on student_achievements for select using (student_id = auth.uid());
+create policy "student_achievements_insert_own" on student_achievements for insert with check (student_id = auth.uid());
 
 -- goals: student only
 create policy "goals_all_own" on goals for all using (student_id = auth.uid());
