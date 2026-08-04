@@ -53,7 +53,7 @@ export function NotificationBell({ userId, audience }: { userId: string; audienc
           </div>
           <div className="max-h-96 overflow-y-auto">
             {mine.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-navy-400">You're all caught up.</p>
+              <p className="px-4 py-8 text-center text-sm text-navy-400">You&apos;re all caught up.</p>
             ) : (
               mine.slice(0, 12).map((n) => {
                 const body = (

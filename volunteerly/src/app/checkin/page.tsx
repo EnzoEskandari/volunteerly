@@ -1,13 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2, XCircle, HeartHandshake, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/context/auth-context";
-import { useAppData } from "@/lib/context/data-context";
-import { formatDate } from "@/lib/utils";
+import { useAppData, type ActionResult } from "@/lib/context/data-context";
 
 export default function CheckInPage() {
   return (
@@ -17,31 +16,38 @@ export default function CheckInPage() {
   );
 }
 
+/**
+ * Scanning the event's QR code lands here with the token in the URL.
+ *
+ * The token is sent straight to the server, which is the only party that
+ * can resolve it — students have no read access to the qr_tokens table.
+ * Everything shown below (including which event this was) comes back from
+ * that verified response rather than from a client-side lookup.
+ */
 function CheckInFlow() {
   const params = useSearchParams();
-  const router = useRouter();
   const token = params.get("token") ?? "";
   const { currentUser, loading } = useAuth();
-  const { checkIn, opportunities, qrTokens } = useAppData();
+  const { checkIn } = useAppData();
 
-  const [result, setResult] = useState<{ ok: boolean; reason?: string } | null>(null);
-  const [ranOnce, setRanOnce] = useState(false);
+  const [result, setResult] = useState<(ActionResult & { title?: string }) | null>(null);
+  const attempted = useRef(false);
 
   useEffect(() => {
-    if (loading || ranOnce || !currentUser) return;
+    if (loading || attempted.current || !currentUser) return;
+    attempted.current = true;
+
     if (currentUser.role !== "student") {
       setResult({ ok: false, reason: "Only student accounts can check in to events." });
-      setRanOnce(true);
       return;
     }
-    const res = checkIn(currentUser.id, token);
-    setResult(res);
-    setRanOnce(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, currentUser, ranOnce]);
+    if (!token) {
+      setResult({ ok: false, reason: "This link is missing its check-in code. Try scanning the QR code again." });
+      return;
+    }
 
-  const qrRecord = qrTokens.find((q) => q.token === token);
-  const opp = opportunities.find((o) => o.id === qrRecord?.opportunityId);
+    void checkIn(token).then((res) => setResult(res as ActionResult & { title?: string }));
+  }, [loading, currentUser, token, checkIn]);
 
   if (loading) return null;
 
@@ -50,16 +56,16 @@ function CheckInFlow() {
       <CenterShell>
         <p className="font-display text-lg font-semibold text-navy-900">Log in to check in</p>
         <p className="mt-2 text-sm text-navy-500">
-          You'll need to be logged in to your student account to confirm attendance.
+          You&apos;ll need to be logged in to your student account to confirm attendance.
         </p>
-        <Link href={`/login?redirect=${encodeURIComponent(`/checkin?token=${token}`)}`} className="mt-6 inline-block">
+        <Link href={`/login?next=${encodeURIComponent(`/checkin?token=${token}`)}`} className="mt-6 inline-block">
           <Button>Log in</Button>
         </Link>
       </CenterShell>
     );
   }
 
-  if (!ranOnce || !result) {
+  if (!result) {
     return (
       <CenterShell>
         <p className="text-sm text-navy-500">Confirming your attendance…</p>
@@ -74,12 +80,8 @@ function CheckInFlow() {
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
             <CheckCircle2 className="h-8 w-8 text-emerald-600" />
           </div>
-          <p className="mt-4 font-display text-xl font-bold text-navy-900">You're checked in!</p>
-          {opp && (
-            <p className="mt-1.5 text-sm text-navy-500">
-              {opp.title} · {formatDate(opp.date)}
-            </p>
-          )}
+          <p className="mt-4 font-display text-xl font-bold text-navy-900">You&apos;re checked in!</p>
+          {result.title && <p className="mt-1.5 text-sm text-navy-500">{result.title}</p>}
           <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-navy-400">
             <Clock className="h-3.5 w-3.5" />
             Arrival time recorded just now
@@ -93,8 +95,13 @@ function CheckInFlow() {
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50">
             <XCircle className="h-8 w-8 text-red-500" />
           </div>
-          <p className="mt-4 font-display text-xl font-bold text-navy-900">Check-in didn't go through</p>
+          <p className="mt-4 font-display text-xl font-bold text-navy-900">Check-in didn&apos;t go through</p>
           <p className="mt-1.5 text-sm text-navy-500">{result.reason}</p>
+          {result.code === "membership-required" && (
+            <Link href="/dashboard/student" className="mt-5 inline-block">
+              <Button>Activate membership</Button>
+            </Link>
+          )}
         </>
       )}
       <Link href="/dashboard/student" className="mt-6 inline-block">

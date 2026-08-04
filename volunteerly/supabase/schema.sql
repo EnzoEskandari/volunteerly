@@ -2,6 +2,19 @@
 -- Volunteerly — Supabase / PostgreSQL schema
 -- Run inside the Supabase SQL editor, or via `supabase db push`.
 -- Tables map 1:1 to the domain types in src/lib/types.ts
+--
+-- SECURITY MODEL
+-- --------------
+-- Row-level security is the real access boundary, not the UI. Two rules
+-- shape every policy below:
+--
+--   1. Anything a user could lie about to their own benefit is written by
+--      the server (service role) after validation — never by the browser.
+--      That covers joining an event, checking in, verifying hours, and
+--      membership status. Client-side INSERT is simply not granted.
+--   2. Reads are scoped to what the requester legitimately needs. Student
+--      PII is visible to the student, to orgs hosting an event they
+--      registered for, and to admins — not to the whole internet.
 -- ═══════════════════════════════════════════════════════════════════════
 
 create extension if not exists "uuid-ossp";
@@ -14,6 +27,8 @@ create type opportunity_status as enum ('open', 'full', 'completed', 'cancelled'
 create type notification_audience as enum ('student', 'organization');
 create type report_status as enum ('open', 'investigating', 'resolved', 'dismissed');
 create type virtual_pref as enum ('virtual', 'in-person', 'both');
+create type membership_status as enum ('inactive', 'active', 'waived', 'past_due', 'cancelled');
+create type waiver_status as enum ('pending', 'approved', 'denied');
 
 -- ───────────────────────────── profiles ──────────────────────────────────
 -- One row per auth.users entry. Role determines which detail table applies.
@@ -32,6 +47,9 @@ create table students (
   school text,
   grad_year int,
   location text,
+  -- Geocoded from `location` so "near me" is a real distance, not a guess.
+  lat double precision,
+  lng double precision,
   age int,
   interests text[] not null default '{}',
   skills text[] not null default '{}',
@@ -42,12 +60,16 @@ create table students (
   virtual_preference virtual_pref not null default 'both',
   transportation boolean not null default false,
   onboarding_complete boolean not null default false,
+  -- ── server-owned columns (see protect_student_columns trigger) ────────
   total_verified_hours numeric not null default 0,
   volunteer_streak_weeks int not null default 0,
-  membership_active boolean not null default false,
+  membership_status membership_status not null default 'inactive',
   membership_expires_at date,
-  membership_waived boolean not null default false
+  stripe_customer_id text,
+  stripe_subscription_id text
 );
+
+create index on students (stripe_customer_id);
 
 create table organizations (
   id uuid primary key references profiles (id) on delete cascade,
@@ -58,6 +80,7 @@ create table organizations (
   ein text,
   category text[] not null default '{}',
   location text,
+  -- server-owned: only admins move an org through approval
   approval_status org_approval_status not null default 'pending',
   rejection_reason text,
   contact_name text,
@@ -84,8 +107,9 @@ create table volunteer_opportunities (
   lat double precision,
   lng double precision,
   hours_available numeric not null,
-  max_volunteers int not null,
-  current_volunteers int not null default 0,
+  max_volunteers int not null check (max_volunteers > 0),
+  -- server-owned: maintained by the join/cancel routes, never by a client
+  current_volunteers int not null default 0 check (current_volunteers >= 0),
   min_age int,
   required_certifications text[] default '{}',
   requires_background_check boolean not null default false,
@@ -107,6 +131,10 @@ create table volunteer_registrations (
   unique (student_id, opportunity_id)
 );
 
+-- One QR code per event, displayed/printed by the organization and scanned
+-- by every attendee. There is deliberately no "used" flag: a single code
+-- serves the whole roster, and per-student uniqueness is enforced by the
+-- unique constraint on attendance_records.registration_id below.
 create table qr_tokens (
   opportunity_id uuid primary key references volunteer_opportunities (id) on delete cascade,
   token text not null unique,
@@ -124,6 +152,10 @@ create table attendance_records (
 );
 
 -- ───────────────────────────── verified hours ────────────────────────────
+-- Append-only by design. Section 5.6 of the spec: a verified entry is
+-- permanently locked and a student can never edit or delete it. Enforced
+-- three ways — no update/delete policy, a hard trigger below, and the
+-- absence of any client-side write path.
 create table verified_hours (
   id uuid primary key default uuid_generate_v4(),
   student_id uuid not null references students (id) on delete cascade,
@@ -137,6 +169,35 @@ create table verified_hours (
 );
 
 create index on verified_hours (student_id);
+
+-- ───────────────────────────── membership / billing ──────────────────────
+-- Need-based fee waivers (spec §6). Self-serve request, admin decision.
+create table membership_waiver_requests (
+  id uuid primary key default uuid_generate_v4(),
+  student_id uuid not null references students (id) on delete cascade,
+  reason text not null,
+  program text,                       -- e.g. "Free/reduced-price lunch"
+  status waiver_status not null default 'pending',
+  decided_by uuid references admins (id),
+  decided_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index on membership_waiver_requests (status);
+
+-- Audit trail of real Stripe activity. Written only by the webhook.
+create table membership_payments (
+  id uuid primary key default uuid_generate_v4(),
+  student_id uuid not null references students (id) on delete cascade,
+  stripe_event_id text not null unique,   -- idempotency guard for retries
+  stripe_invoice_id text,
+  amount_cents int not null,
+  currency text not null default 'usd',
+  period_end date,
+  created_at timestamptz not null default now()
+);
+
+create index on membership_payments (student_id);
 
 -- ───────────────────────────── goals & achievements ──────────────────────
 create table goals (
@@ -203,58 +264,264 @@ create table reports (
   created_at timestamptz not null default now()
 );
 
+-- ═══════════════════════════ helper functions ════════════════════════════
+-- security definer so the lookup itself isn't blocked by profiles' own RLS.
+
+create or replace function is_admin() returns boolean as $$
+  select exists (select 1 from profiles where id = auth.uid() and role = 'admin');
+$$ language sql stable security definer set search_path = public;
+
+-- True when the caller is an organization hosting an event this student
+-- has registered for. Scopes roster/PII reads to a real relationship.
+create or replace function shares_event_with_student(s_id uuid) returns boolean as $$
+  select exists (
+    select 1
+    from volunteer_registrations r
+    join volunteer_opportunities o on o.id = r.opportunity_id
+    where r.student_id = s_id and o.org_id = auth.uid()
+  );
+$$ language sql stable security definer set search_path = public;
+
+-- ═══════════════════════════ column guards ═══════════════════════════════
+-- RLS grants or denies whole rows; these triggers protect specific columns
+-- that a user may otherwise legitimately update on their own row.
+-- The service role bypasses RLS but still runs triggers, so each guard
+-- explicitly exempts it — that is the only path allowed to move them.
+
+create or replace function protect_student_columns() returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role'
+     or auth.uid() is null then
+    return new;
+  end if;
+
+  -- A student may edit their profile, never their money or their record.
+  if new.total_verified_hours is distinct from old.total_verified_hours
+     or new.membership_status is distinct from old.membership_status
+     or new.membership_expires_at is distinct from old.membership_expires_at
+     or new.stripe_customer_id is distinct from old.stripe_customer_id
+     or new.stripe_subscription_id is distinct from old.stripe_subscription_id
+     or new.volunteer_streak_weeks is distinct from old.volunteer_streak_weeks then
+    raise exception
+      'These fields are set by Volunteerly, not by the account holder.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger students_protect_server_columns
+  before update on students
+  for each row execute function protect_student_columns();
+
+create or replace function protect_org_columns() returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role'
+     or auth.uid() is null
+     or is_admin() then
+    return new;
+  end if;
+
+  if new.approval_status is distinct from old.approval_status
+     or new.rejection_reason is distinct from old.rejection_reason then
+    raise exception 'Approval status is set by Volunteerly administrators.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger organizations_protect_approval
+  before update on organizations
+  for each row execute function protect_org_columns();
+
+-- Opportunity headcount is derived from real registrations, so an
+-- organization can edit its listing but not inflate its own numbers.
+create or replace function protect_opportunity_columns() returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role' or auth.uid() is null then
+    return new;
+  end if;
+
+  if new.current_volunteers is distinct from old.current_volunteers then
+    raise exception 'Volunteer count is maintained by Volunteerly.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger opportunities_protect_count
+  before update on volunteer_opportunities
+  for each row execute function protect_opportunity_columns();
+
+-- A student may cancel their own registration and nothing else. Without
+-- this, the same policy that permits cancelling would also permit setting
+-- status to 'attended' — self-reported attendance, which would bypass QR
+-- check-in entirely and then satisfy the hour-verification route.
+create or replace function protect_registration_columns() returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role' or auth.uid() is null then
+    return new;
+  end if;
+
+  if new.status is distinct from old.status and new.status <> 'cancelled' then
+    raise exception 'Attendance is recorded by checking in at the event.';
+  end if;
+
+  if new.opportunity_id is distinct from old.opportunity_id
+     or new.student_id is distinct from old.student_id then
+    raise exception 'A registration cannot be reassigned.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger registrations_cancel_only
+  before update on volunteer_registrations
+  for each row execute function protect_registration_columns();
+
+-- Marking a notification read is the only edit its recipient may make;
+-- rewriting the title or body of one is not.
+create or replace function protect_notification_columns() returns trigger as $$
+begin
+  if current_setting('role', true) = 'service_role' or auth.uid() is null then
+    return new;
+  end if;
+
+  if new.title is distinct from old.title
+     or new.body is distinct from old.body
+     or new.link is distinct from old.link
+     or new.type is distinct from old.type
+     or new.user_id is distinct from old.user_id then
+    raise exception 'Only the read status of a notification can be changed.';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger notifications_read_only_flag
+  before update on notifications
+  for each row execute function protect_notification_columns();
+
+-- Verified hours are immutable, full stop — no exemption, not even for
+-- the service role. Corrections are made by issuing a new entry.
+create or replace function verified_hours_are_immutable() returns trigger as $$
+begin
+  raise exception
+    'Verified hours are a permanent record and cannot be changed or removed.';
+end;
+$$ language plpgsql;
+
+create trigger verified_hours_no_update
+  before update or delete on verified_hours
+  for each row execute function verified_hours_are_immutable();
+
+-- Keep the student's running total honest: it is recomputed from the
+-- verified_hours table itself rather than incremented by the caller.
+create or replace function sync_student_hours() returns trigger as $$
+begin
+  update students
+     set total_verified_hours = (
+       select coalesce(sum(hours), 0) from verified_hours where student_id = new.student_id
+     )
+   where id = new.student_id;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger verified_hours_sync_total
+  after insert on verified_hours
+  for each row execute function sync_student_hours();
+
 -- ═══════════════════════════ row level security ══════════════════════════
-alter table profiles enable row level security;
-alter table students enable row level security;
-alter table organizations enable row level security;
-alter table volunteer_opportunities enable row level security;
-alter table volunteer_registrations enable row level security;
-alter table attendance_records enable row level security;
-alter table verified_hours enable row level security;
-alter table goals enable row level security;
-alter table notifications enable row level security;
-alter table reports enable row level security;
-alter table qr_tokens enable row level security;
-alter table announcements enable row level security;
-alter table student_achievements enable row level security;
+alter table profiles                   enable row level security;
+alter table students                   enable row level security;
+alter table organizations              enable row level security;
+alter table admins                     enable row level security;
+alter table volunteer_opportunities    enable row level security;
+alter table volunteer_registrations    enable row level security;
+alter table attendance_records         enable row level security;
+alter table verified_hours             enable row level security;
+alter table goals                      enable row level security;
+alter table achievements               enable row level security;
+alter table student_achievements       enable row level security;
+alter table notifications              enable row level security;
+alter table announcements              enable row level security;
+alter table reports                    enable row level security;
+alter table qr_tokens                  enable row level security;
+alter table membership_waiver_requests enable row level security;
+alter table membership_payments        enable row level security;
 
--- Helper: current user's role
-create or replace function current_role_is(r user_role) returns boolean as $$
-  select exists (select 1 from profiles where id = auth.uid() and role = r);
-$$ language sql stable security definer;
-
--- profiles: readable by owner + admins, editable by owner only
+-- ── profiles ─────────────────────────────────────────────────────────────
 create policy "profiles_select_own_or_admin" on profiles for select
-  using (id = auth.uid() or current_role_is('admin'));
+  using (id = auth.uid() or is_admin());
 create policy "profiles_insert_own" on profiles for insert
   with check (id = auth.uid());
 create policy "profiles_update_own" on profiles for update
-  using (id = auth.uid());
+  using (id = auth.uid()) with check (id = auth.uid());
 
--- students: student edits own row; orgs & admins can view (for roster views)
-create policy "students_select" on students for select using (true);
+-- ── students ─────────────────────────────────────────────────────────────
+-- Scoped read: yourself, an org you actually volunteered with, or an admin.
+-- (The old `using (true)` exposed every student's age, school and location
+-- to anyone holding the public anon key.)
+create policy "students_select_scoped" on students for select
+  using (
+    id = auth.uid()
+    or is_admin()
+    or shares_event_with_student(id)
+  );
 create policy "students_insert_own" on students for insert
   with check (id = auth.uid());
-create policy "students_update_own" on students for update using (id = auth.uid());
+-- Profile edits only; the column guard trigger blocks membership + hours.
+create policy "students_update_own" on students for update
+  using (id = auth.uid()) with check (id = auth.uid());
 
--- organizations: public read of approved orgs; org edits own row; admin all
+-- ── organizations ────────────────────────────────────────────────────────
 create policy "orgs_select_approved_or_owner" on organizations for select
-  using (approval_status = 'approved' or id = auth.uid() or current_role_is('admin'));
+  using (approval_status = 'approved' or id = auth.uid() or is_admin());
 create policy "orgs_insert_own" on organizations for insert
   with check (id = auth.uid());
-create policy "orgs_update_own" on organizations for update using (id = auth.uid());
-create policy "orgs_admin_update" on organizations for update using (current_role_is('admin'));
+create policy "orgs_update_own_or_admin" on organizations for update
+  using (id = auth.uid() or is_admin());
 
--- opportunities: public read; org manages its own; admin all
-create policy "opps_select_all" on volunteer_opportunities for select using (true);
+-- ── admins ───────────────────────────────────────────────────────────────
+-- Previously this table had no RLS at all, which let anyone holding the
+-- public anon key insert themselves an admin row. Reads are admin-only and
+-- there is no client-side insert path: admins are provisioned server-side.
+create policy "admins_select_admin_only" on admins for select
+  using (is_admin());
+
+-- ── opportunities ────────────────────────────────────────────────────────
+-- Public discovery feed, but only from approved organizations.
+create policy "opps_select_public" on volunteer_opportunities for select
+  using (
+    exists (
+      select 1 from organizations o
+      where o.id = org_id and o.approval_status = 'approved'
+    )
+    or org_id = auth.uid()
+    or is_admin()
+  );
 create policy "opps_insert_own_org" on volunteer_opportunities for insert
-  with check (org_id = auth.uid());
+  with check (
+    org_id = auth.uid()
+    and exists (
+      select 1 from organizations o
+      where o.id = auth.uid() and o.approval_status = 'approved'
+    )
+  );
 create policy "opps_update_own_org" on volunteer_opportunities for update
-  using (org_id = auth.uid() or current_role_is('admin'));
+  using (org_id = auth.uid() or is_admin());
 create policy "opps_delete_own_org" on volunteer_opportunities for delete
-  using (org_id = auth.uid());
+  using (org_id = auth.uid() or is_admin());
 
--- registrations: student manages own; org sees registrants for its events
+-- ── registrations ────────────────────────────────────────────────────────
+-- No client INSERT. Joining runs through /api/opportunities/join, which
+-- checks membership, capacity, age and certifications first. A student may
+-- cancel their own registration.
 create policy "reg_select_own_or_org" on volunteer_registrations for select
   using (
     student_id = auth.uid()
@@ -262,65 +529,152 @@ create policy "reg_select_own_or_org" on volunteer_registrations for select
       select 1 from volunteer_opportunities o
       where o.id = opportunity_id and o.org_id = auth.uid()
     )
+    or is_admin()
   );
-create policy "reg_insert_own" on volunteer_registrations for insert
-  with check (student_id = auth.uid());
+create policy "reg_update_own_cancel" on volunteer_registrations for update
+  using (student_id = auth.uid()) with check (student_id = auth.uid());
 
--- verified_hours: student reads own (read-only!); org inserts for its events
-create policy "hours_select_own_or_org" on verified_hours for select
-  using (student_id = auth.uid() or org_id = auth.uid());
-create policy "hours_insert_org_only" on verified_hours for insert
-  with check (org_id = auth.uid());
--- NOTE: intentionally no update/delete policy for students — hours are
--- immutable once verified, per spec ("Students cannot edit them").
-
--- notifications: only the owner reads/updates their own
-create policy "notif_select_own" on notifications for select using (user_id = auth.uid());
-create policy "notif_update_own" on notifications for update using (user_id = auth.uid());
-
--- attendance: visible to the student who checked in or the hosting org; the
--- student's own device is what records the scan, so insert is student-driven
+-- ── attendance ───────────────────────────────────────────────────────────
+-- No client INSERT: the browser posts the scanned token to
+-- /api/checkin, which validates it server-side. Letting the client write
+-- here would mean self-reported attendance.
 create policy "attendance_select" on attendance_records for select
   using (
     student_id = auth.uid()
-    or exists (select 1 from volunteer_opportunities o where o.id = opportunity_id and o.org_id = auth.uid())
+    or exists (
+      select 1 from volunteer_opportunities o
+      where o.id = opportunity_id and o.org_id = auth.uid()
+    )
+    or is_admin()
   );
-create policy "attendance_insert_own" on attendance_records for insert
-  with check (student_id = auth.uid());
 
--- qr_tokens: the token string itself is the access control (short-lived,
--- single-use, unguessable) — students look one up by value to check in,
--- so selecting is open, but only the hosting org can generate one
-create policy "qr_select_any" on qr_tokens for select using (true);
-create policy "qr_insert_own_org" on qr_tokens for insert
-  with check (exists (select 1 from volunteer_opportunities o where o.id = opportunity_id and o.org_id = auth.uid()));
-create policy "qr_update_authenticated" on qr_tokens for update using (auth.uid() is not null);
+-- ── qr_tokens ────────────────────────────────────────────────────────────
+-- Read is restricted to the hosting organization (which displays the code)
+-- and admins. Students never read this table — they submit a scanned token
+-- to the server, which looks it up with the service role. The previous
+-- `using (true)` let any student enumerate every code and check in to
+-- events they never attended.
+create policy "qr_select_own_org" on qr_tokens for select
+  using (
+    exists (
+      select 1 from volunteer_opportunities o
+      where o.id = opportunity_id and o.org_id = auth.uid()
+    )
+    or is_admin()
+  );
 
--- notifications: only the owner reads/updates their own, but any signed-in
--- user can create a notification *for* someone else (e.g. a student
--- registering notifies the organization, not themselves)
-create policy "notif_select_own" on notifications for select using (user_id = auth.uid());
-create policy "notif_insert_any_authenticated" on notifications for insert with check (auth.uid() is not null);
-create policy "notif_update_own" on notifications for update using (user_id = auth.uid());
+-- ── verified hours ───────────────────────────────────────────────────────
+-- Insert happens through /api/hours/verify (service role) after confirming
+-- the caller owns the event. No update/delete policy exists, and the
+-- immutability trigger above backs that up.
+create policy "hours_select_own_or_org" on verified_hours for select
+  using (student_id = auth.uid() or org_id = auth.uid() or is_admin());
 
--- announcements: publicly readable, only the posting org can create one
+-- ── goals ────────────────────────────────────────────────────────────────
+create policy "goals_all_own" on goals for all
+  using (student_id = auth.uid()) with check (student_id = auth.uid());
+
+-- ── achievements ─────────────────────────────────────────────────────────
+-- Static catalog: readable by anyone, writable by no one but the server.
+create policy "achievements_select_any" on achievements for select using (true);
+create policy "student_achievements_select_own" on student_achievements for select
+  using (student_id = auth.uid() or is_admin());
+
+-- ── notifications ────────────────────────────────────────────────────────
+-- Insert is server-only. Previously any signed-in user could write a
+-- notification to any other user, which is a spam and phishing vector.
+create policy "notif_select_own" on notifications for select
+  using (user_id = auth.uid());
+create policy "notif_update_own" on notifications for update
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ── announcements ────────────────────────────────────────────────────────
 create policy "announcements_select_any" on announcements for select using (true);
-create policy "announcements_insert_own_org" on announcements for insert with check (org_id = auth.uid());
+create policy "announcements_insert_own_org" on announcements for insert
+  with check (org_id = auth.uid());
 
--- student_achievements: a student can view and unlock their own
-create policy "student_achievements_select_own" on student_achievements for select using (student_id = auth.uid());
-create policy "student_achievements_insert_own" on student_achievements for insert with check (student_id = auth.uid());
-
--- goals: student only
-create policy "goals_all_own" on goals for all using (student_id = auth.uid());
-
--- reports: reporter + admin
+-- ── reports ──────────────────────────────────────────────────────────────
 create policy "reports_select" on reports for select
-  using (reporter_id = auth.uid() or current_role_is('admin'));
-create policy "reports_insert" on reports for insert with check (reporter_id = auth.uid());
-create policy "reports_admin_update" on reports for update using (current_role_is('admin'));
+  using (reporter_id = auth.uid() or is_admin());
+create policy "reports_insert" on reports for insert
+  with check (reporter_id = auth.uid());
+create policy "reports_admin_update" on reports for update using (is_admin());
+
+-- ── membership ───────────────────────────────────────────────────────────
+-- A student files their own waiver request and can watch its status;
+-- only an admin decides it (enforced by the update policy).
+create policy "waiver_select_own_or_admin" on membership_waiver_requests for select
+  using (student_id = auth.uid() or is_admin());
+create policy "waiver_insert_own" on membership_waiver_requests for insert
+  with check (student_id = auth.uid() and status = 'pending');
+create policy "waiver_admin_update" on membership_waiver_requests for update
+  using (is_admin());
+
+-- Payment history is readable by the student it belongs to. Rows are
+-- written exclusively by the Stripe webhook via the service role.
+create policy "payments_select_own_or_admin" on membership_payments for select
+  using (student_id = auth.uid() or is_admin());
+
+-- ═══════════════════════════ account provisioning ═══════════════════════
+-- Creates the profile + role row the moment an auth user is created,
+-- reading what registration collected from the sign-up metadata.
+--
+-- This runs as a trigger rather than as a client-side insert because when
+-- email confirmation is switched on there is no session immediately after
+-- sign-up, so the browser has no authenticated identity to insert with.
+-- Doing it here means registration works identically either way.
+--
+-- Note the role is clamped: anyone can pass metadata, so 'admin' is not
+-- reachable through public sign-up. Admins are provisioned deliberately.
+create or replace function handle_new_user() returns trigger as $$
+declare
+  meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  requested text := coalesce(meta ->> 'role', 'student');
+  resolved user_role;
+begin
+  resolved := case when requested = 'organization' then 'organization'::user_role
+                   else 'student'::user_role end;
+
+  insert into profiles (id, email, role)
+  values (new.id, new.email, resolved)
+  on conflict (id) do nothing;
+
+  if resolved = 'student' then
+    insert into students (id, full_name, age)
+    values (
+      new.id,
+      coalesce(nullif(trim(meta ->> 'full_name'), ''), split_part(new.email, '@', 1)),
+      nullif(meta ->> 'age', '')::int
+    )
+    on conflict (id) do nothing;
+  else
+    insert into organizations (id, name, ein, website, contact_name, description, category)
+    values (
+      new.id,
+      coalesce(nullif(trim(meta ->> 'name'), ''), 'Unnamed organization'),
+      nullif(meta ->> 'ein', ''),
+      nullif(meta ->> 'website', ''),
+      nullif(meta ->> 'contact_name', ''),
+      nullif(meta ->> 'description', ''),
+      coalesce(
+        (select array_agg(value::text) from jsonb_array_elements_text(meta -> 'category')),
+        '{}'
+      )
+    )
+    on conflict (id) do nothing;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function handle_new_user();
 
 -- ═══════════════════════════ seed: achievements catalog ══════════════════
+-- This is a static catalog of badges the product defines — not user data,
+-- and not fabricated activity. It ships empty of any earned rows.
 insert into achievements (key, label, description, icon, category) values
   ('first-event', 'First Volunteer Event', 'Completed your first verified volunteer event', 'Sparkles', 'milestone'),
   ('hours-10', '10 Hours', 'Reached 10 verified service hours', 'Clock', 'milestone'),

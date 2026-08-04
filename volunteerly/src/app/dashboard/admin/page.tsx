@@ -10,24 +10,24 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { useAppData } from "@/lib/context/data-context";
 import { useToast } from "@/components/ui/toast";
 import { timeAgo } from "@/lib/utils";
-import { platformStatsSeed } from "@/lib/mock-data";
 import { formatCompactNumber } from "@/lib/utils";
 
 export default function AdminOverviewPage() {
-  const { organizations, students, reports, setOrgApproval } = useAppData();
+  const { organizations, reports, setOrgApproval, platformStats } = useAppData();
   const { showToast } = useToast();
 
   const pending = organizations.filter((o) => o.approvalStatus === "pending");
   const openReports = reports.filter((r) => r.status === "open" || r.status === "investigating");
 
-  const approve = (id: string, name: string) => {
-    setOrgApproval(id, "approved");
-    showToast(`${name} approved`);
+  const approve = async (id: string, name: string) => {
+    const result = await setOrgApproval(id, "approved");
+    showToast(result.ok ? `${name} approved` : (result.reason ?? "Couldn't approve that organization."), result.ok ? "success" : "info");
   };
-  const reject = (id: string, name: string) => {
-    const reason = prompt(`Reason for rejecting ${name}?`) ?? undefined;
-    setOrgApproval(id, "rejected", reason);
-    showToast(`${name} rejected`, "info");
+  const reject = async (id: string, name: string) => {
+    const reason = prompt(`Reason for rejecting ${name}? The organization sees this message.`);
+    if (!reason?.trim()) return;
+    const result = await setOrgApproval(id, "rejected", reason);
+    showToast(result.ok ? `${name} rejected` : (result.reason ?? "Couldn't reject that organization."), "info");
   };
 
   return (
@@ -38,8 +38,8 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Students" value={formatCompactNumber(platformStatsSeed.students)} icon={GraduationCap} tone="brand" />
-        <StatCard label="Organizations" value={formatCompactNumber(platformStatsSeed.organizations)} icon={Building2} tone="emerald" />
+        <StatCard label="Students" value={formatCompactNumber(platformStats.students)} icon={GraduationCap} tone="brand" />
+        <StatCard label="Organizations" value={formatCompactNumber(platformStats.organizations)} icon={Building2} tone="emerald" />
         <StatCard label="Pending Reviews" value={pending.length} icon={Users} tone="navy" />
         <StatCard label="Open Reports" value={openReports.length} icon={ShieldAlert} tone="brand" />
       </div>

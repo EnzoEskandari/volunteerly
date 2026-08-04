@@ -4,7 +4,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { useAppData } from "@/lib/context/data-context";
-import { platformStatsSeed } from "@/lib/mock-data";
 import { formatCompactNumber } from "@/lib/utils";
 import { GraduationCap, Building2, CalendarCheck, Clock } from "lucide-react";
 import { CAUSE_CATEGORIES } from "@/lib/types";
@@ -12,7 +11,7 @@ import { CAUSE_CATEGORIES } from "@/lib/types";
 const COLORS = ["#2563EB", "#10B981", "#0F172A", "#8FB1FA", "#6EE7B7", "#425477", "#34D399", "#1D4FD6", "#96A4BF", "#059669", "#193689", "#C3CCDC", "#047857"];
 
 export default function AdminAnalyticsPage() {
-  const { opportunities, organizations } = useAppData();
+  const { opportunities, organizations, platformStats } = useAppData();
 
   const byCategory = CAUSE_CATEGORIES.map((c) => ({
     name: c,
@@ -31,10 +30,10 @@ export default function AdminAnalyticsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Students" value={formatCompactNumber(platformStatsSeed.students)} icon={GraduationCap} tone="brand" />
-        <StatCard label="Organizations" value={formatCompactNumber(platformStatsSeed.organizations)} icon={Building2} tone="emerald" />
-        <StatCard label="Opportunities" value={formatCompactNumber(platformStatsSeed.opportunities)} icon={CalendarCheck} tone="navy" />
-        <StatCard label="Verified Hours" value={formatCompactNumber(platformStatsSeed.verifiedHours)} icon={Clock} tone="brand" />
+        <StatCard label="Students" value={formatCompactNumber(platformStats.students)} icon={GraduationCap} tone="brand" />
+        <StatCard label="Organizations" value={formatCompactNumber(platformStats.organizations)} icon={Building2} tone="emerald" />
+        <StatCard label="Opportunities" value={formatCompactNumber(platformStats.opportunities)} icon={CalendarCheck} tone="navy" />
+        <StatCard label="Verified Hours" value={formatCompactNumber(platformStats.verifiedHours)} icon={Clock} tone="brand" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

@@ -4,9 +4,10 @@ import { useState } from "react";
 import { ShieldCheck, Check, HeartHandshake } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Input, Label } from "@/components/ui/input";
 import { useAppData } from "@/lib/context/data-context";
 import { useToast } from "@/components/ui/toast";
-import { MEMBERSHIP_PRICE_USD } from "@/lib/types";
+import { formatMembershipPrice, MEMBERSHIP_INTERVAL } from "@/lib/pricing";
 
 const included = [
   "Join unlimited volunteer opportunities",
@@ -19,37 +20,49 @@ const included = [
 export function MembershipModal({
   open,
   onClose,
-  studentId,
-  onActivated,
 }: {
   open: boolean;
   onClose: () => void;
-  studentId: string;
+  /** @deprecated identity comes from the session; kept for call-site compatibility */
+  studentId?: string;
   onActivated?: () => void;
 }) {
-  const { activateMembership } = useAppData();
+  const { startMembershipCheckout, requestFeeWaiver } = useAppData();
   const { showToast } = useToast();
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showWaiverForm, setShowWaiverForm] = useState(false);
+  const [reason, setReason] = useState("");
+  const [program, setProgram] = useState("");
 
-  const subscribe = () => {
+  /**
+   * Hands off to Stripe Checkout. Membership becomes active only when the
+   * webhook confirms the payment settled — this function redirecting is
+   * not itself a grant of access.
+   */
+  const subscribe = async () => {
     setProcessing(true);
-    // Simulated checkout — production wires this to a real Stripe Checkout
-    // Session (see src/lib/stripe.ts) and activates membership from the
-    // webhook once payment succeeds, rather than client-side like this demo.
-    setTimeout(() => {
-      activateMembership(studentId, false);
+    setError(null);
+    const result = await startMembershipCheckout();
+    if (!result.ok) {
       setProcessing(false);
-      showToast(`You're a Volunteerly member! $${MEMBERSHIP_PRICE_USD}/year, renews next July.`);
-      onActivated?.();
-      onClose();
-    }, 700);
+      setError(result.reason ?? "We couldn't open checkout just now.");
+      return;
+    }
+    // On success the browser is already navigating to Stripe.
   };
 
-  const requestWaiver = () => {
-    activateMembership(studentId, true);
-    showToast("Fee waiver applied — you're all set for this year.");
-    onActivated?.();
+  const submitWaiver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProcessing(true);
+    setError(null);
+    const result = await requestFeeWaiver({ reason, program: program || undefined });
+    setProcessing(false);
+    if (!result.ok) {
+      setError(result.reason ?? "We couldn't submit that request.");
+      return;
+    }
+    showToast("Waiver request submitted — we'll email you once it's reviewed.");
     onClose();
   };
 
@@ -59,10 +72,10 @@ export function MembershipModal({
         <>
           <div className="rounded-2xl border border-brand-100 bg-brand-50 p-5 text-center">
             <p className="font-display text-3xl font-bold text-navy-900">
-              ${MEMBERSHIP_PRICE_USD}
-              <span className="text-base font-medium text-navy-400">/year</span>
+              {formatMembershipPrice()}
+              <span className="text-base font-medium text-navy-400">/{MEMBERSHIP_INTERVAL}</span>
             </p>
-            <p className="mt-1 text-sm text-navy-500">Less than 42¢/month — cancel anytime</p>
+            <p className="mt-1 text-sm text-navy-500">Cancel anytime</p>
           </div>
 
           <ul className="mt-5 space-y-2.5">
@@ -80,33 +93,77 @@ export function MembershipModal({
             every organization you volunteer with.
           </div>
 
-          <Button className="mt-5 w-full" size="lg" loading={processing} onClick={subscribe}>
+          {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+
+          <Button className="mt-5 w-full" size="lg" loading={processing} onClick={() => void subscribe()}>
             <ShieldCheck className="h-4 w-4" />
-            Subscribe — ${MEMBERSHIP_PRICE_USD}/year
+            Continue to secure checkout
           </Button>
+          <p className="mt-2.5 text-center text-xs text-navy-400">
+            Payments are processed by Stripe. Volunteerly never sees your card details.
+          </p>
           <button
-            onClick={() => setShowWaiverForm(true)}
+            onClick={() => {
+              setShowWaiverForm(true);
+              setError(null);
+            }}
             className="mt-3 w-full text-center text-sm font-medium text-navy-500 underline decoration-navy-300 underline-offset-2 hover:text-navy-700"
           >
             Need a fee waiver instead?
           </button>
         </>
       ) : (
-        <div>
+        <form onSubmit={submitWaiver}>
           <p className="text-sm text-navy-600">
-            If cost is a barrier, Volunteerly waives the membership fee for students who qualify for free or
-            reduced-price lunch, or an equivalent need-based school program. No documentation is required in this
-            demo — in production this would route to a short verification step with your school.
+            Cost should never be the reason you can&apos;t record your service. If you qualify for free or
+            reduced-price lunch — or an equivalent need-based program — tell us briefly and we&apos;ll review your
+            request.
           </p>
+
+          <div className="mt-5 space-y-4">
+            <div>
+              <Label htmlFor="program">Program (optional)</Label>
+              <Input
+                id="program"
+                placeholder="e.g. Free/reduced-price lunch"
+                value={program}
+                onChange={(e) => setProgram(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="reason">Your situation</Label>
+              <textarea
+                id="reason"
+                required
+                minLength={10}
+                rows={4}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="A sentence or two is plenty."
+                className="w-full rounded-xl border border-navy-200 px-3.5 py-2.5 text-sm text-navy-900 outline-none transition placeholder:text-navy-300 focus:border-brand focus:ring-2 focus:ring-brand-100"
+              />
+            </div>
+          </div>
+
+          {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+
           <div className="mt-5 flex gap-2.5">
-            <Button variant="outline" className="flex-1" onClick={() => setShowWaiverForm(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                setShowWaiverForm(false);
+                setError(null);
+              }}
+            >
               Back
             </Button>
-            <Button className="flex-1" onClick={requestWaiver}>
-              Apply Waiver
+            <Button type="submit" className="flex-1" loading={processing}>
+              Submit request
             </Button>
           </div>
-        </div>
+        </form>
       )}
     </Modal>
   );

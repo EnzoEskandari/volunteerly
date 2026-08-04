@@ -9,7 +9,6 @@ import { EmptyState } from "@/components/ui/progress";
 import { useAppData } from "@/lib/context/data-context";
 import { useAuth } from "@/lib/context/auth-context";
 import { milesBetween } from "@/lib/utils";
-import { STUDENT_HOME_COORDS } from "@/lib/mock-data";
 import { recommendedOpportunities } from "@/lib/matching";
 import { SearchX, Sparkles } from "lucide-react";
 import type { Student } from "@/lib/types";
@@ -34,13 +33,15 @@ export default function OpportunitiesPage() {
       if (filters.format === "In-Person" && o.isVirtual) return false;
       if (filters.orgId !== "All" && o.orgId !== filters.orgId) return false;
       if (filters.minHours > 0 && o.hoursAvailable < filters.minHours) return false;
-      if (!o.isVirtual && o.lat && o.lng) {
-        const dist = milesBetween(STUDENT_HOME_COORDS.lat, STUDENT_HOME_COORDS.lng, o.lat, o.lng);
+      // Distance filtering needs a real origin. Without saved coordinates
+      // we show the listing rather than measuring from an invented point.
+      if (!o.isVirtual && o.lat && o.lng && student?.lat != null && student?.lng != null) {
+        const dist = milesBetween(student.lat, student.lng, o.lat, o.lng);
         if (dist > filters.maxDistance) return false;
       }
       return true;
     });
-  }, [opportunities, filters]);
+  }, [opportunities, filters, student]);
 
   const recommended = useMemo(() => {
     if (!student) return [];

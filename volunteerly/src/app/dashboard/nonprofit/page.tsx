@@ -60,7 +60,7 @@ function NonprofitDashboardContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy-900">{org.name}</h1>
-          <p className="mt-1 text-navy-500">Here's your organization's activity at a glance.</p>
+          <p className="mt-1 text-navy-500">Here&apos;s your organization&apos;s activity at a glance.</p>
         </div>
         <Link href="/dashboard/nonprofit/opportunities/new">
           <Button>Create Opportunity</Button>
@@ -191,7 +191,7 @@ function NonprofitDashboardContent() {
               {upcoming[0] && (
                 <Link href={`/dashboard/nonprofit/opportunities/${upcoming[0].id}`} className="mt-3 inline-block">
                   <Button size="sm" variant="outline">
-                    View next event's QR code
+                    View next event&apos;s QR code
                   </Button>
                 </Link>
               )}

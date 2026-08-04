@@ -55,6 +55,9 @@ export interface Student extends BaseUser {
   school?: string;
   gradYear?: number;
   location?: string;
+  /** Geocoded home coordinates; distance filtering is disabled without them. */
+  lat?: number;
+  lng?: number;
   age?: number;
   interests: CauseCategory[];
   skills: string[];
@@ -65,14 +68,37 @@ export interface Student extends BaseUser {
   virtualPreference: "virtual" | "in-person" | "both";
   transportation: boolean;
   onboardingComplete: boolean;
+  // ── server-owned; see protect_student_columns() in supabase/schema.sql ──
   totalVerifiedHours: number;
   volunteerStreakWeeks: number;
-  membershipActive: boolean;
+  membershipStatus: MembershipStatus;
   membershipExpiresAt?: string;
-  membershipWaived?: boolean; // fee-waiver program (need-based)
 }
 
-export const MEMBERSHIP_PRICE_USD = 5;
+/**
+ * 'waived' is a full-access state granted through the need-based fee-waiver
+ * program (spec §6) — functionally identical to 'active', but tracked
+ * separately so it is never mistaken for a paid subscription.
+ */
+export type MembershipStatus = "inactive" | "active" | "waived" | "past_due" | "cancelled";
+
+/** The single gate on joining, checking in, and receiving verified hours. */
+export function hasActiveMembership(student: Pick<Student, "membershipStatus">): boolean {
+  return student.membershipStatus === "active" || student.membershipStatus === "waived";
+}
+
+export type WaiverStatus = "pending" | "approved" | "denied";
+
+export interface MembershipWaiverRequest {
+  id: string;
+  studentId: string;
+  reason: string;
+  program?: string;
+  status: WaiverStatus;
+  decidedBy?: string;
+  decidedAt?: string;
+  createdAt: string;
+}
 
 export type OrgApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 
@@ -173,7 +199,6 @@ export interface Goal {
 }
 
 export interface Achievement {
-  id: string;
   key: string;
   label: string;
   description: string;
@@ -226,11 +251,20 @@ export interface Report {
   createdAt: string;
 }
 
+/**
+ * One code per event, scanned by every attendee — so there is deliberately
+ * no "used" flag. A student checking in twice is prevented by the unique
+ * constraint on attendance_records.registration_id, and the code stops
+ * working at expiresAt (the event's end time).
+ *
+ * Students never receive this object: the token is read only by the
+ * hosting organization, and check-in submits a scanned string to the
+ * server for validation.
+ */
 export interface QRToken {
   opportunityId: string;
   token: string;
   expiresAt: string;
-  used: boolean;
 }
 
 export interface PlatformStats {

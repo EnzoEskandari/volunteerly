@@ -27,18 +27,28 @@ export function VerifyHoursModal({
   const [description, setDescription] = useState(opp.title);
   const [supervisor, setSupervisor] = useState(org.contactName ?? "");
   const [date, setDate] = useState(opp.date);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    verifyHours({
+    setSubmitting(true);
+    setError(null);
+
+    const result = await verifyHours({
       studentId: student.id,
       opportunityId: opp.id,
-      orgId: org.id,
       hours: Number(hours) || 0,
       activityDescription: description,
       supervisor,
       date,
     });
+
+    setSubmitting(false);
+    if (!result.ok) {
+      setError(result.reason ?? "Couldn't verify those hours.");
+      return;
+    }
     showToast(`Verified ${hours} hours for ${student.fullName}`);
     onClose();
   };
@@ -46,6 +56,10 @@ export function VerifyHoursModal({
   return (
     <Modal open={open} onClose={onClose} title={`Verify hours — ${student.fullName}`}>
       <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="rounded-xl bg-navy-50 p-3 text-xs text-navy-500">
+          Once submitted, this becomes a permanent part of {student.fullName.split(" ")[0]}&apos;s record and
+          can&apos;t be edited or removed. Please double-check the hours before verifying.
+        </p>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="hours">Hours completed</Label>
@@ -64,7 +78,8 @@ export function VerifyHoursModal({
           <Label htmlFor="supervisor">Supervisor</Label>
           <Input id="supervisor" required value={supervisor} onChange={(e) => setSupervisor(e.target.value)} placeholder="Full name" />
         </div>
-        <Button type="submit" className="w-full">
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <Button type="submit" className="w-full" loading={submitting}>
           Submit verification
         </Button>
       </form>

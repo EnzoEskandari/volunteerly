@@ -47,7 +47,7 @@ function RegisterForm() {
               )}
             >
               <GraduationCap className={cn("h-6 w-6", accountType === "student" ? "text-brand" : "text-navy-400")} />
-              <span className="text-sm font-semibold text-navy-900">I'm a Student</span>
+              <span className="text-sm font-semibold text-navy-900">I&apos;m a Student</span>
             </button>
             <button
               onClick={() => setAccountType("organization")}
@@ -57,7 +57,7 @@ function RegisterForm() {
               )}
             >
               <Building2 className={cn("h-6 w-6", accountType === "organization" ? "text-brand" : "text-navy-400")} />
-              <span className="text-sm font-semibold text-navy-900">I'm an Organization</span>
+              <span className="text-sm font-semibold text-navy-900">I&apos;m an Organization</span>
             </button>
           </div>
 
@@ -149,7 +149,7 @@ function StudentRegisterForm() {
       <Button type="submit" className="w-full" loading={loading}>
         Create student account
       </Button>
-      <p className="text-center text-xs text-navy-400">Next, we'll ask a few quick questions to personalize your matches.</p>
+      <p className="text-center text-xs text-navy-400">Next, we&apos;ll ask a few quick questions to personalize your matches.</p>
     </form>
   );
 }

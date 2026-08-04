@@ -61,9 +61,9 @@ export default function OpportunityDetailPage() {
   const eligibility = student ? isEligible(student, opp) : null;
   const spotsLeft = opp.maxVolunteers - opp.currentVolunteers;
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!currentUser) {
-      router.push("/login");
+      router.push(`/login?next=${encodeURIComponent(`/opportunities/${opp.id}`)}`);
       return;
     }
     if (!student) {
@@ -71,21 +71,22 @@ export default function OpportunityDetailPage() {
       return;
     }
     setBusy(true);
-    const result = joinOpportunity(student.id, opp.id);
+    const result = await joinOpportunity(opp.id);
     setBusy(false);
     if (result.ok) {
-      showToast("You're registered! The organization has been notified.");
-    } else if (result.reason === "membership-required") {
+      showToast("You&apos;re registered! The organization has been notified.");
+    } else if (result.code === "membership-required") {
       setMembershipModalOpen(true);
     } else {
+      // Every server rejection carries its own specific reason.
       showToast(result.reason ?? "Couldn't join this event.", "error");
     }
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
     if (!myRegistration) return;
-    cancelRegistration(myRegistration.id);
-    showToast("Registration cancelled.", "info");
+    const result = await cancelRegistration(myRegistration.id);
+    showToast(result.ok ? "Registration cancelled." : (result.reason ?? "Couldn't cancel."), result.ok ? "info" : "error");
   };
 
   const share = () => {
@@ -172,7 +173,7 @@ export default function OpportunityDetailPage() {
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3.5 py-3 text-sm font-medium text-emerald-700">
                       <CheckCircle2 className="h-4 w-4" />
-                      You're registered
+                      You&apos;re registered
                     </div>
                     <Button variant="outline" className="w-full" onClick={handleCancel}>
                       Cancel registration
@@ -211,10 +212,6 @@ export default function OpportunityDetailPage() {
           open={membershipModalOpen}
           onClose={() => setMembershipModalOpen(false)}
           studentId={student.id}
-          onActivated={() => {
-            const result = joinOpportunity(student.id, opp.id);
-            if (result.ok) showToast("You're registered! The organization has been notified.");
-          }}
         />
       )}
     </>

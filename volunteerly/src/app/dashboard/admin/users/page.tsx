@@ -17,10 +17,10 @@ export default function AdminUsersPage() {
 
   const filtered = students.filter((s) => s.fullName.toLowerCase().includes(query.toLowerCase()));
 
-  const handleRemove = (id: string, name: string) => {
+  const handleRemove = async (id: string, name: string) => {
     if (!confirm(`Remove ${name}'s account? This can't be undone.`)) return;
-    removeStudent(id);
-    showToast(`${name} removed`, "info");
+    const result = await removeStudent(id);
+    showToast(result.ok ? `${name} removed` : (result.reason ?? "Couldn't remove that account."), result.ok ? "info" : "error");
   };
 
   return (

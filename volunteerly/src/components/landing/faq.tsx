@@ -3,39 +3,40 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { membershipPriceLabel } from "@/lib/pricing";
 
 const faqs = [
   {
     q: "Is Volunteerly free for students?",
-    a: "Creating an account and browsing opportunities is always free. Joining events, checking in with a QR code, and receiving verified hours require a Volunteerly membership — $5/year to start, less than 42¢/month. Fee waivers are available for students who qualify for free or reduced-price lunch or a similar need-based program.",
+    a: `Creating an account and browsing opportunities is always free. Joining events, checking in with a QR code, and receiving verified hours require a Volunteerly membership — ${membershipPriceLabel()}. Fee waivers are available for students who qualify for free or reduced-price lunch or a similar need-based program, so cost is never the reason you can't record your service.`,
   },
   {
-    q: "Why do students pay but organizations don't?",
-    a: "Nonprofits are the opportunities that make Volunteerly worth using, so keeping that side completely free maximizes what students see. The small student membership is what funds the platform instead — it's a lot like paying for a streaming service where the creators post for free and the audience covers the cost.",
+    q: "Why don't organizations pay anything?",
+    a: "Most volunteer platforms charge the nonprofit, or require a school district to buy a license before a single student can sign up. Volunteerly doesn't. Any organization can post unlimited opportunities, generate QR codes, and verify hours for free, permanently — and any student can join today without waiting for their school to purchase anything.",
   },
   {
     q: "How does hour verification actually work?",
-    a: "After your shift, the organization enters your completed hours, an activity description, a supervisor name, and a date directly in Volunteerly. That record appears instantly in your profile with a verification badge — you never edit it yourself, which is exactly what keeps it trustworthy for schools and scholarship applications.",
+    a: "After your shift, the organization enters your completed hours, an activity description, a supervisor's name, and the date. That record appears in your profile with a verification badge and is locked permanently — neither you nor anyone else can edit it afterwards. That's what makes it hold up for schools and scholarship applications.",
   },
   {
     q: "Do I need to apply and get accepted to volunteer?",
-    a: "No. Volunteerly isn't a job application process. If an event has open capacity and you meet any age or certification requirements, tapping Join Event registers you immediately.",
+    a: "No. Volunteerly isn't a job application process. If an event has open capacity and you meet any age or certification requirements, tapping Join registers you immediately.",
   },
   {
     q: "What happens if an event is full?",
-    a: "You won't be able to join until capacity opens up — for example, if another volunteer cancels. You can save the opportunity and we'll notify you if a spot appears.",
+    a: "You won't be able to join until capacity opens up — for example, if another volunteer cancels. If a requirement isn't met, Volunteerly tells you exactly which one rather than just refusing.",
   },
   {
     q: "How does QR check-in work?",
-    a: "Each event gets a unique, single-use QR code. Organizations display or print it on-site, and scanning it while logged into Volunteerly confirms your attendance and logs your arrival time. Codes expire after the event and can't be scanned twice.",
+    a: "Each event gets its own check-in code, which the organization displays or prints on-site. Scanning it while logged in confirms your attendance and records your arrival time. The code stops working when the event ends, and you can't check in to the same event twice.",
   },
   {
     q: "How are nonprofit organizations vetted?",
-    a: "Every organization submits registration details for review by our administrators before they can publish opportunities or verify hours, which keeps the platform trustworthy for students and families.",
+    a: "Every organization submits its registration details — including a tax ID — for review by our administrators before it can publish opportunities or verify hours.",
   },
   {
     q: "Can I download my service hours for a school or scholarship application?",
-    a: "Yes — your dashboard includes a full service transcript you can download at any time, listing every verified hour, organization, and supervisor.",
+    a: "Yes. Your dashboard includes a full service transcript you can download at any time, listing every verified hour along with the organization and supervisor who signed off on it.",
   },
 ];
 

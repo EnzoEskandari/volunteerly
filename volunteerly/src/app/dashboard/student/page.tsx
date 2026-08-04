@@ -70,7 +70,7 @@ export default function StudentDashboardPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy-900">Welcome back, {student.fullName.split(" ")[0]}</h1>
-          <p className="mt-1 text-navy-500">Here's what's happening with your volunteer journey.</p>
+          <p className="mt-1 text-navy-500">Here&apos;s what&apos;s happening with your volunteer journey.</p>
         </div>
         <MembershipStatusPill student={student} onManage={() => setMembershipModalOpen(true)} />
       </div>
@@ -88,7 +88,7 @@ export default function StudentDashboardPage() {
             <CardHeader className="flex-row items-center justify-between">
               <div>
                 <CardTitle>Upcoming Events</CardTitle>
-                <CardDescription>Events you've joined that haven't happened yet</CardDescription>
+                <CardDescription>Events you&apos;ve joined that haven&apos;t happened yet</CardDescription>
               </div>
               <Link href="/opportunities">
                 <Button size="sm" variant="ghost">
@@ -205,15 +205,16 @@ export default function StudentDashboardPage() {
 }
 
 function MembershipStatusPill({ student, onManage }: { student: Student; onManage: () => void }) {
-  if (student.membershipActive) {
+  const waived = student.membershipStatus === "waived";
+  if (student.membershipStatus === "active" || waived) {
     return (
       <button
         onClick={onManage}
         className="flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
       >
         <ShieldCheck className="h-3.5 w-3.5" />
-        {student.membershipWaived ? "Member (fee waived)" : "Member"}
-        {student.membershipExpiresAt && !student.membershipWaived && (
+        {waived ? "Member (fee waived)" : "Member"}
+        {student.membershipExpiresAt && !waived && (
           <span className="text-emerald-600/70">· renews {formatShortDate(student.membershipExpiresAt)}</span>
         )}
       </button>
@@ -225,7 +226,9 @@ function MembershipStatusPill({ student, onManage }: { student: Student; onManag
       className="flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
     >
       <ShieldAlert className="h-3.5 w-3.5" />
-      Membership inactive — join opportunities require a membership
+      {student.membershipStatus === "past_due"
+        ? "Payment failed — update your details to keep joining opportunities"
+        : "Membership inactive — joining an opportunity requires a membership"}
     </button>
   );
 }

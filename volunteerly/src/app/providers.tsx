@@ -5,12 +5,16 @@ import { DataProvider } from "@/lib/context/data-context";
 import { AuthProvider } from "@/lib/context/auth-context";
 import { ToastProvider } from "@/components/ui/toast";
 
+/**
+ * AuthProvider sits outside DataProvider: identity resolves first, and the
+ * data layer then loads only what that particular user is entitled to.
+ */
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <DataProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <DataProvider>
         <ToastProvider>{children}</ToastProvider>
-      </AuthProvider>
-    </DataProvider>
+      </DataProvider>
+    </AuthProvider>
   );
 }

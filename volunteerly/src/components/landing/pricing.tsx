@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Check, HeartHandshake } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MEMBERSHIP_PRICE_USD } from "@/lib/types";
+import { formatMembershipPrice, MEMBERSHIP_INTERVAL } from "@/lib/pricing";
 
 const studentIncluded = [
   "Personalized opportunity recommendations",
@@ -38,10 +38,10 @@ export function Pricing() {
           <div className="rounded-2xl border-2 border-brand bg-white p-7 shadow-card-hover">
             <p className="text-sm font-semibold uppercase tracking-wide text-brand">Students</p>
             <p className="mt-3 font-display text-4xl font-bold text-navy-900">
-              ${MEMBERSHIP_PRICE_USD}
-              <span className="text-base font-medium text-navy-400">/year</span>
+              {formatMembershipPrice()}
+              <span className="text-base font-medium text-navy-400">/{MEMBERSHIP_INTERVAL}</span>
             </p>
-            <p className="mt-1 text-sm text-navy-400">Less than 42¢/month</p>
+            <p className="mt-1 text-sm text-navy-400">Cancel anytime</p>
             <ul className="mt-6 space-y-2.5">
               {studentIncluded.map((item) => (
                 <li key={item} className="flex items-start gap-2.5 text-sm text-navy-700">

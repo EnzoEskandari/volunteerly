@@ -15,7 +15,7 @@ import type { Organization } from "@/lib/types";
 export default function AnnouncementsPage() {
   const { currentUser } = useAuth();
   const org = currentUser as Organization;
-  const { opportunities, registrations, announcements, postAnnouncement, pushNotification } = useAppData();
+  const { opportunities, announcements, postAnnouncement } = useAppData();
   const { showToast } = useToast();
 
   const [title, setTitle] = useState("");
@@ -27,33 +27,29 @@ export default function AnnouncementsPage() {
     .filter((a) => a.orgId === org.id)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !body) return;
 
-    postAnnouncement({ orgId: org.id, orgName: org.name, title, body, opportunityId: opportunityId || undefined });
+    setSubmitting(true);
+    // The server posts the announcement and notifies the registered
+    // volunteers in one step — notifications are server-write-only.
+    const result = await postAnnouncement({ title, body, opportunityId: opportunityId || undefined });
+    setSubmitting(false);
 
-    const recipients = opportunityId
-      ? registrations.filter((r) => r.opportunityId === opportunityId && r.status !== "cancelled").map((r) => r.studentId)
-      : Array.from(
-          new Set(
-            registrations
-              .filter((r) => myOpps.some((o) => o.id === r.opportunityId) && r.status !== "cancelled")
-              .map((r) => r.studentId),
-          ),
-        );
+    if (!result.ok) {
+      showToast(result.reason ?? "Couldn't post that announcement.", "error");
+      return;
+    }
 
-    recipients.forEach((studentId) => {
-      pushNotification({
-        userId: studentId,
-        audience: "student",
-        type: "announcement",
-        title: `${org.name} posted an announcement`,
-        body: title,
-      });
-    });
-
-    showToast(`Announcement sent to ${recipients.length} volunteer${recipients.length === 1 ? "" : "s"}`);
+    const notified = (result as { notified?: number }).notified ?? 0;
+    showToast(
+      notified > 0
+        ? `Announcement sent to ${notified} volunteer${notified === 1 ? "" : "s"}`
+        : "Announcement posted. No volunteers are registered yet, so nobody was notified.",
+    );
     setTitle("");
     setBody("");
     setOpportunityId("");

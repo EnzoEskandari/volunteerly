@@ -1,60 +1,86 @@
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Production role-based route protection.
+ * Server-side route protection.
  *
- * This build ships with NEXT_PUBLIC_USE_MOCK_DATA=true, so auth lives in
- * localStorage and route protection happens client-side via
- * <RequireRole> (see src/components/auth/require-role.tsx) — middleware
- * can't read localStorage during SSR.
+ * This runs before any /dashboard route renders, so an unauthenticated or
+ * wrong-role request never reaches the page. It is a usability layer, not
+ * the security boundary — row-level security and the API route handlers
+ * are what actually protect the data. Someone bypassing the UI entirely
+ * still cannot read or write anything they shouldn't.
  *
- * Once Supabase Auth is wired up (NEXT_PUBLIC_USE_MOCK_DATA=false), this
- * middleware becomes the real guard: it runs on the edge before any
- * /dashboard/* route renders, reads the Supabase session cookie via
- * @supabase/ssr, and redirects unauthenticated or wrong-role requests
- * before they ever reach the page. Uncomment the implementation below
- * once real Supabase credentials are in place.
+ * The role is read from the profiles table rather than from JWT metadata,
+ * which a user can influence at sign-up.
  */
-export function middleware(request: NextRequest) {
-  return NextResponse.next();
+export async function middleware(request: NextRequest) {
+  let response = NextResponse.next({ request: { headers: request.headers } });
 
-  // ── Production implementation ─────────────────────────────────────
-  // import { createServerClient } from "@supabase/ssr";
-  //
-  // let response = NextResponse.next({ request });
-  // const supabase = createServerClient(
-  //   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  //   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  //   {
-  //     cookies: {
-  //       get: (name) => request.cookies.get(name)?.value,
-  //       set: (name, value, options) => response.cookies.set({ name, value, ...options }),
-  //       remove: (name, options) => response.cookies.set({ name, value: "", ...options }),
-  //     },
-  //   },
-  // );
-  //
-  // const { data: { session } } = await supabase.auth.getSession();
-  // const path = request.nextUrl.pathname;
-  //
-  // if (path.startsWith("/dashboard") && !session) {
-  //   return NextResponse.redirect(new URL("/login", request.url));
-  // }
-  //
-  // const role = session?.user?.user_metadata?.role;
-  // if (path.startsWith("/dashboard/student") && role !== "student") {
-  //   return NextResponse.redirect(new URL("/", request.url));
-  // }
-  // if (path.startsWith("/dashboard/nonprofit") && role !== "organization") {
-  //   return NextResponse.redirect(new URL("/", request.url));
-  // }
-  // if (path.startsWith("/dashboard/admin") && role !== "admin") {
-  //   return NextResponse.redirect(new URL("/", request.url));
-  // }
-  //
-  // return response;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Without credentials there's no session to check; the app itself will
+  // surface a clear configuration error rather than silently allowing access.
+  if (!url || !anonKey) return response;
+
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      get: (name: string) => request.cookies.get(name)?.value,
+      set: (name: string, value: string, options: CookieOptions) => {
+        request.cookies.set({ name, value, ...options });
+        response = NextResponse.next({ request: { headers: request.headers } });
+        response.cookies.set({ name, value, ...options });
+      },
+      remove: (name: string, options: CookieOptions) => {
+        request.cookies.set({ name, value: "", ...options });
+        response = NextResponse.next({ request: { headers: request.headers } });
+        response.cookies.set({ name, value: "", ...options });
+      },
+    },
+  });
+
+  // getUser() revalidates the token rather than trusting the cookie, and
+  // refreshes it onto `response` as a side effect.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const path = request.nextUrl.pathname;
+  const isDashboard = path.startsWith("/dashboard");
+  const isCheckin = path.startsWith("/checkin");
+
+  if (!user && (isDashboard || isCheckin)) {
+    const redirect = new URL("/login", request.url);
+    redirect.searchParams.set("next", path);
+    return NextResponse.redirect(redirect);
+  }
+
+  if (user && isDashboard) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const role = profile?.role;
+    const home =
+      role === "organization"
+        ? "/dashboard/nonprofit"
+        : role === "admin"
+          ? "/dashboard/admin"
+          : "/dashboard/student";
+
+    const allowed =
+      (path.startsWith("/dashboard/student") && role === "student") ||
+      (path.startsWith("/dashboard/nonprofit") && role === "organization") ||
+      (path.startsWith("/dashboard/admin") && role === "admin");
+
+    if (!allowed) return NextResponse.redirect(new URL(home, request.url));
+  }
+
+  return response;
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/checkin/:path*"],
 };

@@ -8,8 +8,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useAuth } from "@/lib/context/auth-context";
 import { useAppData } from "@/lib/context/data-context";
 import { useToast } from "@/components/ui/toast";
-import { genId } from "@/lib/utils";
-import { CAUSE_CATEGORIES, type CauseCategory, type Organization, type VolunteerOpportunity } from "@/lib/types";
+import { CAUSE_CATEGORIES, type CauseCategory, type Organization } from "@/lib/types";
 
 export default function NewOpportunityPage() {
   const { currentUser } = useAuth();
@@ -33,17 +32,19 @@ export default function NewOpportunityPage() {
     requiresBackgroundCheck: false,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title || !form.date) {
       showToast("Please fill in a title and date.", "error");
       return;
     }
-    const opp: VolunteerOpportunity = {
-      id: genId("opp"),
-      orgId: org.id,
-      orgName: org.name,
-      orgLogoUrl: org.logoUrl,
+
+    setSubmitting(true);
+    // The server creates the listing and its check-in code together, and
+    // generates the QR token with crypto-grade randomness.
+    const result = await createOpportunity({
       title: form.title,
       description: form.description,
       category: form.category,
@@ -54,17 +55,18 @@ export default function NewOpportunityPage() {
       isVirtual: form.isVirtual,
       hoursAvailable: Number(form.hoursAvailable) || 1,
       maxVolunteers: Number(form.maxVolunteers) || 1,
-      currentVolunteers: 0,
-      requirements: {
-        minAge: form.minAge ? Number(form.minAge) : undefined,
-        backgroundCheck: form.requiresBackgroundCheck || undefined,
-      },
-      status: "open",
-      createdAt: new Date().toISOString(),
-    };
-    createOpportunity(opp);
+      minAge: form.minAge ? Number(form.minAge) : undefined,
+      certifications: [],
+      backgroundCheck: form.requiresBackgroundCheck,
+    });
+    setSubmitting(false);
+
+    if (!result.ok || !result.id) {
+      showToast(result.reason ?? "Couldn't publish that opportunity.", "error");
+      return;
+    }
     showToast("Opportunity published!");
-    router.push(`/dashboard/nonprofit/opportunities/${opp.id}`);
+    router.push(`/dashboard/nonprofit/opportunities/${result.id}`);
   };
 
   return (
@@ -166,7 +168,7 @@ export default function NewOpportunityPage() {
               </div>
             </div>
 
-            <Button type="submit" className="w-full" size="lg">
+            <Button type="submit" loading={submitting} className="w-full" size="lg">
               Publish Opportunity
             </Button>
           </form>
