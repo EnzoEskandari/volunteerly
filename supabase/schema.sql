@@ -18,6 +18,7 @@
 -- ═══════════════════════════════════════════════════════════════════════
 
 create extension if not exists "uuid-ossp";
+create extension if not exists pgcrypto;   -- gen_random_bytes, for certificate numbers
 
 -- ───────────────────────────── enums ─────────────────────────────────────
 create type user_role as enum ('student', 'organization', 'admin');
@@ -151,11 +152,64 @@ create table attendance_records (
   unique (registration_id) -- a student can only check in once per registration
 );
 
+-- ───────────────────────────── certificate numbers ──────────────────────
+-- Every verified entry is issued a serial number that a third party — a
+-- scholarship committee, an admissions office — can look up at
+-- /verify/<number> to confirm the record is genuine. That lookup is the
+-- entire point: a certificate nobody can check is just a nice-looking PDF.
+--
+-- The number is therefore the credential. It's drawn from a CSPRNG rather
+-- than a sequence so it can't be guessed or enumerated, and the alphabet
+-- is Crockford base32 (no I, L, O or U) so a number read off paper or
+-- dictated over the phone can't be mistyped into someone else's.
+--
+-- 32^12 ≈ 1.15e18 possibilities; the uniqueness re-check below makes a
+-- collision a non-event rather than a failed verification.
+create or replace function generate_certificate_number() returns text as $$
+declare
+  alphabet constant text := '0123456789ABCDEFGHJKMNPQRSTVWXYZ';  -- exactly 32
+  candidate text;
+  chunk text;
+  bytes bytea;
+  i int;
+  attempts int := 0;
+begin
+  loop
+    bytes := gen_random_bytes(12);
+    chunk := '';
+    -- 256 is an exact multiple of 32, so this modulo introduces no bias.
+    for i in 0..11 loop
+      chunk := chunk || substr(alphabet, 1 + (get_byte(bytes, i) % 32), 1);
+    end loop;
+
+    candidate := 'VLY-' || to_char(now(), 'YYYY')
+              || '-' || substr(chunk, 1, 4)
+              || '-' || substr(chunk, 5, 4)
+              || '-' || substr(chunk, 9, 4);
+
+    exit when not exists (
+      select 1 from verified_hours where certificate_number = candidate
+    );
+
+    attempts := attempts + 1;
+    if attempts >= 10 then
+      raise exception 'Could not allocate a unique certificate number';
+    end if;
+  end loop;
+
+  return candidate;
+end;
+$$ language plpgsql volatile security definer set search_path = public;
+
 -- ───────────────────────────── verified hours ────────────────────────────
 -- Append-only by design. Section 5.6 of the spec: a verified entry is
 -- permanently locked and a student can never edit or delete it. Enforced
 -- three ways — no update/delete policy, a hard trigger below, and the
 -- absence of any client-side write path.
+--
+-- The certificate number inherits that immutability for free: because no
+-- UPDATE is possible on this table at all, a number can never be reissued,
+-- reassigned, or edited to point at different hours after the fact.
 create table verified_hours (
   id uuid primary key default uuid_generate_v4(),
   student_id uuid not null references students (id) on delete cascade,
@@ -165,10 +219,12 @@ create table verified_hours (
   activity_description text not null,
   supervisor text not null,
   date date not null,
-  verified_at timestamptz not null default now()
+  verified_at timestamptz not null default now(),
+  certificate_number text not null unique default generate_certificate_number()
 );
 
 create index on verified_hours (student_id);
+create index on verified_hours (certificate_number);
 
 -- ───────────────────────────── membership / billing ──────────────────────
 -- Need-based fee waivers (spec §6). Self-serve request, admin decision.

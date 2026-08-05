@@ -1,13 +1,13 @@
 "use client";
 
-import { Printer, Download, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { Printer, Download, ShieldCheck, FileText, ExternalLink } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/progress";
 import { useAuth } from "@/lib/context/auth-context";
 import { useAppData } from "@/lib/context/data-context";
 import { formatDate } from "@/lib/utils";
-import { FileText } from "lucide-react";
 import type { Student } from "@/lib/types";
 
 export default function TranscriptPage() {
@@ -22,8 +22,17 @@ export default function TranscriptPage() {
   const total = records.reduce((sum, r) => sum + r.hours, 0);
 
   const downloadCsv = () => {
-    const header = ["Organization", "Date", "Hours", "Description", "Supervisor"];
-    const rows = records.map((r) => [r.orgName, r.date, r.hours, `"${r.activityDescription.replace(/"/g, '""')}"`, r.supervisor]);
+    // Certificate number leads: it's the column that makes a row checkable
+    // by whoever receives this file.
+    const header = ["Certificate Number", "Organization", "Date", "Hours", "Description", "Supervisor"];
+    const rows = records.map((r) => [
+      r.certificateNumber,
+      `"${r.orgName.replace(/"/g, '""')}"`,
+      r.date,
+      r.hours,
+      `"${r.activityDescription.replace(/"/g, '""')}"`,
+      `"${r.supervisor.replace(/"/g, '""')}"`,
+    ]);
     const csv = [header, ...rows].map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -68,43 +77,69 @@ export default function TranscriptPage() {
             </div>
           </div>
         </CardHeader>
+
         <CardContent className="p-0">
           {records.length === 0 ? (
             <div className="p-6">
-              <EmptyState icon={FileText} title="No verified hours yet" description="Completed and verified events will appear here." />
+              <EmptyState
+                icon={FileText}
+                title="No verified hours yet"
+                description="Completed and verified events will appear here, each with its own certificate."
+              />
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-navy-100 text-left text-xs uppercase tracking-wide text-navy-400">
-                  <th className="px-6 py-3 font-medium">Organization</th>
-                  <th className="px-6 py-3 font-medium">Date</th>
-                  <th className="px-6 py-3 font-medium">Hours</th>
-                  <th className="px-6 py-3 font-medium">Supervisor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((r) => (
-                  <tr key={r.id} className="border-b border-navy-50 last:border-0">
-                    <td className="px-6 py-4">
+            <ul className="divide-y divide-navy-50">
+              {records.map((r) => (
+                <li key={r.id} className="px-6 py-5">
+                  <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                    <div className="min-w-0">
                       <p className="font-medium text-navy-900">{r.orgName}</p>
-                      <p className="mt-0.5 text-xs text-navy-400">{r.activityDescription}</p>
-                    </td>
-                    <td className="px-6 py-4 text-navy-600">{formatDate(r.date)}</td>
-                    <td className="px-6 py-4 font-medium text-navy-900">{r.hours}</td>
-                    <td className="px-6 py-4 text-navy-600">
-                      <div className="flex items-center gap-1.5">
-                        {r.supervisor}
-                        <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" aria-label="Verified" />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <p className="mt-0.5 text-sm text-navy-500">{r.activityDescription}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-display text-lg font-bold text-navy-900">{r.hours}</p>
+                      <p className="text-xs text-navy-400">hours</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-navy-500">
+                    <span>{formatDate(r.date)}</span>
+                    <span className="flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
+                      Verified by {r.supervisor}
+                    </span>
+                  </div>
+
+                  {/* The certificate for this entry, sitting directly under it. */}
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl bg-navy-50 px-3.5 py-2.5 print:bg-white print:ring-1 print:ring-navy-200">
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-navy-400">Certificate</p>
+                      <p className="mt-0.5 break-all font-mono text-xs font-semibold text-navy-800">
+                        {r.certificateNumber}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/verify/${r.certificateNumber}`}
+                      target="_blank"
+                      className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-brand hover:underline print:hidden"
+                    >
+                      View certificate
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>
+
+      {records.length > 0 && (
+        <p className="text-center text-xs leading-relaxed text-navy-400">
+          Each certificate can be confirmed by anyone at{" "}
+          <span className="font-mono">/verify</span> — no Volunteerly account needed.
+        </p>
+      )}
     </div>
   );
 }

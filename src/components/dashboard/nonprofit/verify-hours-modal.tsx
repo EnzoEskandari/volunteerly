@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { ShieldCheck, ExternalLink } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -29,6 +31,7 @@ export function VerifyHoursModal({
   const [date, setDate] = useState(opp.date);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,12 +52,56 @@ export function VerifyHoursModal({
       setError(result.reason ?? "Couldn't verify those hours.");
       return;
     }
+
     showToast(`Verified ${hours} hours for ${student.fullName}`);
+    // Show the issued certificate rather than closing outright — the
+    // organization signed this, so it should see what it put its name to.
+    setIssued((result as { certificateNumber?: string }).certificateNumber ?? null);
+  };
+
+  const close = () => {
+    setIssued(null);
     onClose();
   };
 
+  if (issued) {
+    return (
+      <Modal open={open} onClose={close} title="Certificate issued">
+        <div className="text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50">
+            <ShieldCheck className="h-7 w-7 text-emerald-600" />
+          </div>
+
+          <p className="mt-4 text-sm text-navy-600">
+            {hours} hours verified for{" "}
+            <span className="font-semibold text-navy-900">{student.fullName}</span>. A certificate has been
+            issued in your organization&apos;s name.
+          </p>
+
+          <div className="mt-5 rounded-xl bg-navy-50 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-wider text-navy-400">Certificate number</p>
+            <p className="mt-1 break-all font-mono text-sm font-semibold text-navy-900">{issued}</p>
+          </div>
+
+          <Link
+            href={`/verify/${issued}`}
+            target="_blank"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline"
+          >
+            View certificate
+            <ExternalLink className="h-3.5 w-3.5" />
+          </Link>
+
+          <Button className="mt-6 w-full" onClick={close}>
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title={`Verify hours — ${student.fullName}`}>
+    <Modal open={open} onClose={close} title={`Verify hours — ${student.fullName}`}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="rounded-xl bg-navy-50 p-3 text-xs text-navy-500">
           Once submitted, this becomes a permanent part of {student.fullName.split(" ")[0]}&apos;s record and

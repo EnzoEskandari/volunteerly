@@ -109,7 +109,7 @@ export async function POST(request: Request) {
         supervisor,
         date,
       })
-      .select("id, verified_at")
+      .select("id, verified_at, certificate_number")
       .single();
 
     if (insertErr) return serverError("verify: insert hours", insertErr);
@@ -126,11 +126,17 @@ export async function POST(request: Request) {
       audience: "student",
       type: "hour-verified",
       title: `${hours} hours verified by ${org?.name ?? "an organization"}`,
-      body: `Your service at ${opp.title} is now part of your permanent record.`,
+      body:
+        `Your service at ${opp.title} is now part of your permanent record. ` +
+        `Certificate ${inserted.certificate_number} has been issued.`,
       link: "/dashboard/student/transcript",
     });
 
-    return apiOk({ id: inserted.id, verifiedAt: inserted.verified_at });
+    return apiOk({
+      id: inserted.id,
+      verifiedAt: inserted.verified_at,
+      certificateNumber: inserted.certificate_number,
+    });
   } catch (err) {
     return serverError("verify", err);
   }

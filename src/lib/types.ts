@@ -184,6 +184,54 @@ export interface VerifiedHours {
   date: string;
   verifiedAt: string;
   verifiedBadge: true;
+  /** Serial number of the certificate issued for this entry, e.g.
+   *  "VLY-2026-K7M2-P9XQ-3B7T". Assigned by the database at insert and
+   *  immutable thereafter; publicly checkable at /verify/<number>. */
+  certificateNumber: string;
+}
+
+/**
+ * The full, self-contained record behind one certificate.
+ *
+ * Assembled server-side by joining everything a reader needs to judge the
+ * claim without taking Volunteerly's word for it: who served, which
+ * organization vouched for it, that organization's tax ID and contact
+ * details, who supervised, and exactly when it was attested.
+ */
+export interface ServiceCertificate {
+  certificateNumber: string;
+  hours: number;
+  activityDescription: string;
+  supervisor: string;
+  serviceDate: string;
+  verifiedAt: string;
+
+  student: {
+    fullName: string;
+    email: string;
+    school?: string;
+    gradYear?: number;
+  };
+
+  organization: {
+    name: string;
+    email: string;
+    ein?: string;
+    website?: string;
+    location?: string;
+    contactName?: string;
+    contactPhone?: string;
+  };
+
+  opportunity: {
+    title: string;
+    category: string;
+    location: string;
+    isVirtual: boolean;
+    date: string;
+    startTime?: string;
+    endTime?: string;
+  };
 }
 
 export interface Goal {
