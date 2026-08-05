@@ -56,13 +56,25 @@ export async function middleware(request: NextRequest) {
   }
 
   if (user && isDashboard) {
-    const { data: profile } = await supabase
+    const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
 
-    const role = profile?.role;
+    // An unknown role must never turn into a guessed redirect: defaulting
+    // to /dashboard/student when the role can't be determined means a
+    // request already sitting at /dashboard/student gets redirected to
+    // itself — the same URL, forever, which is a real infinite loop and
+    // not merely a bad guess. This is a UX layer, not the security
+    // boundary (that's RLS and the API routes), so failing open here by
+    // letting the request through is the safe choice, not a risky one.
+    if (profileErr || !profile) {
+      if (profileErr) console.error("[volunteerly] middleware: role lookup failed:", profileErr);
+      return response;
+    }
+
+    const role = profile.role;
     const home =
       role === "organization"
         ? "/dashboard/nonprofit"
@@ -75,7 +87,11 @@ export async function middleware(request: NextRequest) {
       (path.startsWith("/dashboard/nonprofit") && role === "organization") ||
       (path.startsWith("/dashboard/admin") && role === "admin");
 
-    if (!allowed) return NextResponse.redirect(new URL(home, request.url));
+    // Belt and suspenders: even with a known role, never redirect a path
+    // to itself.
+    if (!allowed && home !== path) {
+      return NextResponse.redirect(new URL(home, request.url));
+    }
   }
 
   return response;
