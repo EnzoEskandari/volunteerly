@@ -224,7 +224,9 @@ create table verified_hours (
 );
 
 create index on verified_hours (student_id);
-create index on verified_hours (certificate_number);
+-- No separate index on certificate_number: the UNIQUE constraint on the
+-- column already creates one, and that same constraint is what makes a
+-- duplicate number impossible rather than merely unlikely.
 
 -- ───────────────────────────── membership / billing ──────────────────────
 -- Need-based fee waivers (spec §6). Self-serve request, admin decision.

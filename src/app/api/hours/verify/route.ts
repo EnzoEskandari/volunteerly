@@ -98,21 +98,49 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: inserted, error: insertErr } = await db
-      .from("verified_hours")
-      .insert({
-        student_id: studentId,
-        opportunity_id: opportunityId,
-        org_id: user.id,
-        hours,
-        activity_description: activityDescription,
-        supervisor,
-        date,
-      })
-      .select("id, verified_at, certificate_number")
-      .single();
+    // One INSERT creates the record and its certificate together: the
+    // number comes from a database DEFAULT on this same row, so a verified
+    // entry without a certificate isn't a state that can exist. Nothing
+    // here has to remember to issue one.
+    //
+    // That column is also UNIQUE. A collision is astronomically unlikely
+    // (12 CSPRNG characters over a 32-symbol alphabet), but if one ever
+    // occurred the right outcome is a fresh number — not a failed
+    // verification the organization has to puzzle over. Hence the retry.
+    const row = {
+      student_id: studentId,
+      opportunity_id: opportunityId,
+      org_id: user.id,
+      hours,
+      activity_description: activityDescription,
+      supervisor,
+      date,
+    };
 
-    if (insertErr) return serverError("verify: insert hours", insertErr);
+    type InsertedRow = { id: string; verified_at: string; certificate_number: string };
+
+    let inserted: InsertedRow | null = null;
+    let insertErr: unknown = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await db
+        .from("verified_hours")
+        .insert(row)
+        .select("id, verified_at, certificate_number")
+        .single();
+
+      if (!result.error) {
+        inserted = result.data as InsertedRow;
+        break;
+      }
+
+      insertErr = result.error;
+      // 23505 = unique_violation. Anything else won't fix itself on retry.
+      if ((result.error as { code?: string }).code !== "23505") break;
+      console.warn("[volunteerly] certificate number collision — retrying");
+    }
+
+    if (!inserted) return serverError("verify: insert hours", insertErr);
 
     // students.total_verified_hours is recomputed by the sync_student_hours
     // trigger, so it can never drift from the underlying records.
