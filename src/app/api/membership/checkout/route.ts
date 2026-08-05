@@ -68,7 +68,13 @@ export async function POST() {
       metadata: { volunteerly_student_id: user.id },
       success_url: `${siteUrl}/dashboard/student?membership=success`,
       cancel_url: `${siteUrl}/dashboard/student?membership=cancelled`,
-allow_promotion_codes: true,
+      allow_promotion_codes: true,
+      // Stripe's "Managed Payments" (on by default for newer accounts)
+      // requires a tax code on every product unless explicitly disabled.
+      // A flat membership fee has no tax complexity to model, so this
+      // opts out rather than configuring Stripe Tax product codes.
+      // Newer than the pinned SDK's TS types (v16), hence the cast.
+      ...({ managed_payments: { enabled: false } } as Record<string, unknown>),
     });
 
     if (!session.url) return serverError("checkout: no session url", new Error("Stripe returned no URL"));
