@@ -693,13 +693,18 @@ on conflict do nothing;
 -- requires the underlying role to hold table-level privileges before RLS is
 -- even consulted. Creating tables through the SQL editor (rather than
 -- Supabase's Table Editor UI, which grants these automatically) skips that
--- step, and every query from the browser fails with 403 until it's granted
--- explicitly here. RLS remains the real gate — this just lets the anon and
--- authenticated roles attempt the operation at all.
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on all tables in schema public to anon, authenticated;
-grant usage, select on all sequences in schema public to anon, authenticated;
+-- step, and every query fails with "permission denied" until it's granted
+-- explicitly here — regardless of RLS.
+--
+-- service_role is included deliberately: it bypasses RLS, but it is NOT
+-- exempt from these base table grants. Every route under src/app/api uses
+-- service_role for its writes, so leaving it out breaks every one of them
+-- with a bare "permission denied for table X" — RLS remains the real gate
+-- for anon/authenticated; this just lets each role touch the table at all.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
+grant usage, select on all sequences in schema public to anon, authenticated, service_role;
 alter default privileges in schema public
-  grant select, insert, update, delete on tables to anon, authenticated;
+  grant select, insert, update, delete on tables to anon, authenticated, service_role;
 alter default privileges in schema public
-  grant usage, select on sequences to anon, authenticated;
+  grant usage, select on sequences to anon, authenticated, service_role;
