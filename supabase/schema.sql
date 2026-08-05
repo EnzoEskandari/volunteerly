@@ -687,3 +687,19 @@ insert into achievements (key, label, description, icon, category) values
   ('education-mentor', 'Education Mentor', 'Logged 10+ hours in Education causes', 'GraduationCap', 'cause'),
   ('four-week-streak', 'Four Week Streak', 'Volunteered four weeks in a row', 'Flame', 'streak')
 on conflict do nothing;
+
+-- ═══════════════════════════ table privileges ════════════════════════════
+-- Row-level security policies only ever restrict *rows* — Postgres still
+-- requires the underlying role to hold table-level privileges before RLS is
+-- even consulted. Creating tables through the SQL editor (rather than
+-- Supabase's Table Editor UI, which grants these automatically) skips that
+-- step, and every query from the browser fails with 403 until it's granted
+-- explicitly here. RLS remains the real gate — this just lets the anon and
+-- authenticated roles attempt the operation at all.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+grant usage, select on all sequences in schema public to anon, authenticated;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated;
+alter default privileges in schema public
+  grant usage, select on sequences to anon, authenticated;
