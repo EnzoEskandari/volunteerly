@@ -35,8 +35,9 @@ export async function POST(request: Request) {
       .from("students")
       .select("id, age, skills, membership_status, full_name")
       .eq("id", user.id)
-      .single();
-    if (studentErr || !student) return apiError("not-found", "We couldn't find your student profile.", 404);
+      .maybeSingle();
+    if (studentErr) return serverError("join: fetch student", studentErr);
+    if (!student) return apiError("not-found", "We couldn't find your student profile.", 404);
 
     // ── Membership gate (spec §6: browsing is free, joining is not) ──────
     const active = student.membership_status === "active" || student.membership_status === "waived";
@@ -54,8 +55,9 @@ export async function POST(request: Request) {
         "id, org_id, title, status, max_volunteers, current_volunteers, min_age, required_certifications, date",
       )
       .eq("id", opportunityId)
-      .single();
-    if (oppErr || !opp) return apiError("not-found", "That opportunity no longer exists.", 404);
+      .maybeSingle();
+    if (oppErr) return serverError("join: fetch opportunity", oppErr);
+    if (!opp) return apiError("not-found", "That opportunity no longer exists.", 404);
 
     if (opp.status === "cancelled") return apiError("not-eligible", "This event has been cancelled.");
     if (opp.status === "completed") return apiError("not-eligible", "This event has already taken place.");

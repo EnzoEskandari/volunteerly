@@ -20,12 +20,13 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: reg } = await db
+    const { data: reg, error: regErr } = await db
       .from("volunteer_registrations")
       .select("id, student_id, opportunity_id, status")
       .eq("id", parsed.data.registrationId)
       .maybeSingle();
 
+    if (regErr) return serverError("cancel: fetch registration", regErr);
     if (!reg) return apiError("not-found", "We couldn't find that registration.", 404);
     if (reg.student_id !== user.id) {
       return apiError("forbidden", "You can only cancel your own registration.", 403);

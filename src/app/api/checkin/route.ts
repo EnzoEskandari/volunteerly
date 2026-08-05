@@ -28,23 +28,25 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: qr } = await db
+    const { data: qr, error: qrErr } = await db
       .from("qr_tokens")
       .select("opportunity_id, token, expires_at")
       .eq("token", parsed.data.token)
       .maybeSingle();
 
+    if (qrErr) return serverError("checkin: fetch qr token", qrErr);
     if (!qr) return apiError("not-found", "This check-in code isn't recognized.", 404);
 
     if (new Date(qr.expires_at).getTime() < Date.now()) {
       return apiError("expired", "This check-in code has expired — the event has already ended.", 410);
     }
 
-    const { data: membership } = await db
+    const { data: membership, error: membershipErr } = await db
       .from("students")
       .select("membership_status, full_name")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
+    if (membershipErr) return serverError("checkin: fetch student", membershipErr);
 
     const active =
       membership?.membership_status === "active" || membership?.membership_status === "waived";
@@ -56,22 +58,24 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: reg } = await db
+    const { data: reg, error: regErr } = await db
       .from("volunteer_registrations")
       .select("id, status")
       .eq("student_id", user.id)
       .eq("opportunity_id", qr.opportunity_id)
       .maybeSingle();
 
+    if (regErr) return serverError("checkin: fetch registration", regErr);
     if (!reg || reg.status === "cancelled") {
       return apiError("forbidden", "You aren't registered for this event.", 403);
     }
 
-    const { data: alreadyIn } = await db
+    const { data: alreadyIn, error: alreadyInErr } = await db
       .from("attendance_records")
       .select("id")
       .eq("registration_id", reg.id)
       .maybeSingle();
+    if (alreadyInErr) return serverError("checkin: check existing attendance", alreadyInErr);
 
     if (alreadyIn) {
       return apiError("duplicate", "You've already checked in to this event.", 409);

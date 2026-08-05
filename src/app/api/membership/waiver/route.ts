@@ -28,26 +28,29 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: student } = await db
+    const { data: student, error: studentErr } = await db
       .from("students")
       .select("membership_status")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (student?.membership_status === "waived") {
+    if (studentErr) return serverError("waiver: fetch student", studentErr);
+    if (!student) return apiError("not-found", "We couldn't find your student profile.", 404);
+    if (student.membership_status === "waived") {
       return apiError("invalid", "Your membership fee is already waived.");
     }
-    if (student?.membership_status === "active") {
+    if (student.membership_status === "active") {
       return apiError("invalid", "You already have an active paid membership.");
     }
 
-    const { data: pending } = await db
+    const { data: pending, error: pendingErr } = await db
       .from("membership_waiver_requests")
       .select("id")
       .eq("student_id", user.id)
       .eq("status", "pending")
       .maybeSingle();
 
+    if (pendingErr) return serverError("waiver: check pending", pendingErr);
     if (pending) {
       return apiError("duplicate", "You already have a waiver request under review.", 409);
     }

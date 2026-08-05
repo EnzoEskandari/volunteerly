@@ -21,12 +21,13 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: req } = await db
+    const { data: req, error: reqErr } = await db
       .from("membership_waiver_requests")
       .select("id, student_id, status")
       .eq("id", requestId)
       .maybeSingle();
 
+    if (reqErr) return serverError("admin waiver: fetch request", reqErr);
     if (!req) return apiError("not-found", "That waiver request no longer exists.", 404);
     if (req.status !== "pending") {
       return apiError("invalid", "That waiver request has already been decided.");

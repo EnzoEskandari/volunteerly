@@ -26,13 +26,17 @@ export async function POST() {
     const db = createServiceRoleClient();
     const stripe = getStripe();
 
-    const { data: student } = await db
+    const { data: student, error: studentErr } = await db
       .from("students")
       .select("id, full_name, membership_status, stripe_customer_id")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (!student) return apiError("not-found", "We couldn't find your student profile.", 404);
+    if (studentErr) return serverError("checkout: fetch student", studentErr);
+    if (!student) {
+      console.error(`[volunteerly] checkout: no students row for auth id ${user.id}`);
+      return apiError("not-found", "We couldn't find your student profile.", 404);
+    }
 
     if (student.membership_status === "active" || student.membership_status === "waived") {
       return apiError("invalid", "Your membership is already active.");

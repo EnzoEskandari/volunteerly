@@ -48,12 +48,13 @@ export async function POST(request: Request) {
     const db = createServiceRoleClient();
 
     // The caller must own the event they're verifying against.
-    const { data: opp } = await db
+    const { data: opp, error: oppErr } = await db
       .from("volunteer_opportunities")
       .select("id, org_id, title, category")
       .eq("id", opportunityId)
       .maybeSingle();
 
+    if (oppErr) return serverError("verify: fetch opportunity", oppErr);
     if (!opp) return apiError("not-found", "That opportunity no longer exists.", 404);
     if (opp.org_id !== user.id) {
       return forbidden("You can only verify hours for your own events.");
@@ -62,13 +63,14 @@ export async function POST(request: Request) {
     // …and the student must actually have attended it. Verifying hours for
     // someone who never checked in is exactly the fraud this record has to
     // be resistant to.
-    const { data: reg } = await db
+    const { data: reg, error: regErr } = await db
       .from("volunteer_registrations")
       .select("id, status")
       .eq("student_id", studentId)
       .eq("opportunity_id", opportunityId)
       .maybeSingle();
 
+    if (regErr) return serverError("verify: fetch registration", regErr);
     if (!reg) {
       return apiError("forbidden", "That student isn't registered for this event.", 403);
     }
@@ -80,13 +82,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: existing } = await db
+    const { data: existing, error: existingErr } = await db
       .from("verified_hours")
       .select("id")
       .eq("student_id", studentId)
       .eq("opportunity_id", opportunityId)
       .maybeSingle();
 
+    if (existingErr) return serverError("verify: check existing hours", existingErr);
     if (existing) {
       return apiError(
         "duplicate",

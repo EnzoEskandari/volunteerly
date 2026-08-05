@@ -31,12 +31,13 @@ export async function POST(request: Request) {
     const db = createServiceRoleClient();
 
     if (opportunityId) {
-      const { data: owned } = await db
+      const { data: owned, error: ownedErr } = await db
         .from("volunteer_opportunities")
         .select("id")
         .eq("id", opportunityId)
         .eq("org_id", user.id)
         .maybeSingle();
+      if (ownedErr) return serverError("announcement: check ownership", ownedErr);
       if (!owned) return forbidden("You can only post announcements about your own events.");
     }
 

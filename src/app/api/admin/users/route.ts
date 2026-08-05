@@ -29,12 +29,13 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: profile } = await db
+    const { data: profile, error: profileErr } = await db
       .from("profiles")
       .select("id, role")
       .eq("id", userId)
       .maybeSingle();
 
+    if (profileErr) return serverError("admin: fetch profile", profileErr);
     if (!profile) return apiError("not-found", "That account no longer exists.", 404);
     if (profile.role === "admin") {
       return forbidden("Administrator accounts can't be removed from here.");

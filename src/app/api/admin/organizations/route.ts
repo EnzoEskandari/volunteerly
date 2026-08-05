@@ -25,12 +25,13 @@ export async function POST(request: Request) {
   try {
     const db = createServiceRoleClient();
 
-    const { data: org } = await db
+    const { data: org, error: orgErr } = await db
       .from("organizations")
       .select("id, name")
       .eq("id", organizationId)
       .maybeSingle();
 
+    if (orgErr) return serverError("admin: fetch organization", orgErr);
     if (!org) return apiError("not-found", "That organization no longer exists.", 404);
 
     const { error } = await db

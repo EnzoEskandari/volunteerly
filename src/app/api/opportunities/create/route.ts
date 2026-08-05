@@ -55,12 +55,13 @@ export async function POST(request: Request) {
 
     // Posting is free and unlimited (spec §6) — the only gate is that the
     // organization has been approved by an admin.
-    const { data: org } = await db
+    const { data: org, error: orgErr } = await db
       .from("organizations")
       .select("id, approval_status")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
+    if (orgErr) return serverError("create opportunity: fetch organization", orgErr);
     if (!org) return apiError("not-found", "We couldn't find your organization profile.", 404);
     if (org.approval_status !== "approved") {
       return forbidden(
