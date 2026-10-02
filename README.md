@@ -153,3 +153,22 @@ supabase/
 Deploys to Vercel as-is. Set every variable from `.env.example` in the project's
 environment settings, set `NEXT_PUBLIC_SITE_URL` to the real origin, and add the
 Stripe webhook endpoint. Page analytics are wired via `@vercel/analytics`.
+
+## Blockcraft (browser block game)
+
+`public/craft/` is a self-contained, Minecraft-style voxel game. It is plain
+HTML/JS with no build step and no image assets: textures are painted
+procedurally at startup. Next serves it at `/craft`. You can also host the folder
+on its own with any static file server.
+
+- Works on desktop (keyboard + mouse, pointer lock) and tablets/phones
+  (floating joystick, drag to look, tap to place/use, hold to mine, jump/sneak
+  buttons). On iPad, "Add to Home Screen" runs it full screen.
+- Survival and creative modes, 20-minute day/night cycle, biomes, caves, ores,
+  trees, smooth lighting with torches, water/lava, falling sand/gravel, TNT.
+- Mobs: pig, cow, sheep, chicken, zombie, skeleton (shoots arrows), creeper
+  (explodes) and spider. Undead burn in daylight.
+- Inventory, 2x2/3x3 crafting, furnace smelting, chests, tools with
+  durability, food/hunger, health, fall/drowning/lava damage, a bow.
+- Worlds save to `localStorage`. Options include render distance, FOV,
+  sensitivity, brightness, resolution scale and difficulty.

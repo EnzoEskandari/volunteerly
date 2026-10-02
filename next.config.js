@@ -11,6 +11,10 @@ const nextConfig = {
   experimental: {
     typedRoutes: false,
   },
+  // The Blockcraft game is a static app in public/craft; serve it at /craft.
+  async redirects() {
+    return [{ source: "/craft", destination: "/craft/index.html", permanent: false }];
+  },
 };
 
 module.exports = nextConfig;

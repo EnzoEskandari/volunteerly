@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Blockcraft</title>
+  <meta name="description" content="A blocky survival sandbox that runs in the browser on iPad, phone and laptop.">
+  <meta name="theme-color" content="#1b1b1b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Blockcraft">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- touch layer sits under the HUD but above the canvas -->
+  <div id="touch">
+    <div id="joy"><div id="joy-knob"></div></div>
+  </div>
+
+  <div id="hud" class="hidden">
+    <div id="crosshair"></div>
+    <div id="hurt"></div>
+    <pre id="debug"></pre>
+    <div id="toast"></div>
+    <div id="held-name"></div>
+    <div id="bottom">
+      <div id="bars">
+        <div id="hearts"></div>
+        <div id="air"></div>
+        <div id="food"></div>
+      </div>
+      <div id="hotbar-row">
+        <div id="hotbar"></div>
+        <button id="btn-inv" class="tbtn" aria-label="Inventory">&#8943;</button>
+      </div>
+    </div>
+    <button id="btn-pause" class="tbtn" aria-label="Pause">II</button>
+    <div id="tbuttons">
+      <button id="btn-sneak" class="tbtn" aria-label="Sneak">&#8615;</button>
+      <button id="btn-down" class="tbtn fly-only" aria-label="Fly down">&#9660;</button>
+      <button id="btn-jump" class="tbtn" aria-label="Jump">&#9650;</button>
+    </div>
+  </div>
+
+  <div id="screen-inv" class="hidden">
+    <div id="inv-panel" class="panel"></div>
+  </div>
+  <div id="cursor-item" class="slot floating"></div>
+  <div id="tooltip"></div>
+
+  <div id="menu-title" class="menu">
+    <div class="logo">BLOCKCRAFT</div>
+    <div class="splash">Runs on iPad too!</div>
+    <div class="buttons">
+      <button id="btn-single" class="mc">Singleplayer</button>
+      <button id="btn-options-title" class="mc">Options...</button>
+    </div>
+    <div class="footer">An independent fan-made block game. Not affiliated with Mojang or Microsoft.</div>
+  </div>
+
+  <div id="menu-worlds" class="menu dirt hidden">
+    <h2>Select World</h2>
+    <div id="world-list" class="list"></div>
+    <div class="buttons row">
+      <button id="btn-new-world" class="mc">Create New World</button>
+      <button id="btn-worlds-back" class="mc">Cancel</button>
+    </div>
+  </div>
+
+  <div id="menu-create" class="menu dirt hidden">
+    <h2>Create New World</h2>
+    <div class="form">
+      <label>World Name<input id="world-name" maxlength="32" autocomplete="off"></label>
+      <label>Seed (leave blank for random)<input id="world-seed" maxlength="32" autocomplete="off"></label>
+      <button id="btn-mode" class="mc">Game Mode: Survival</button>
+    </div>
+    <div class="buttons row">
+      <button id="btn-create" class="mc">Create New World</button>
+      <button id="btn-create-back" class="mc">Cancel</button>
+    </div>
+  </div>
+
+  <div id="menu-loading" class="menu dirt hidden">
+    <h2>Generating terrain...</h2>
+  </div>
+
+  <div id="menu-pause" class="menu dim hidden">
+    <h2>Game Menu</h2>
+    <div class="buttons">
+      <button id="btn-resume" class="mc">Back to Game</button>
+      <button id="btn-options-pause" class="mc">Options...</button>
+      <button id="btn-gamemode" class="mc">Game Mode: Survival</button>
+      <button id="btn-quit" class="mc">Save and Quit to Title</button>
+    </div>
+  </div>
+
+  <div id="menu-options" class="menu dirt hidden">
+    <h2>Options</h2>
+    <div id="options-list" class="options"></div>
+    <div class="buttons">
+      <button id="btn-options-done" class="mc">Done</button>
+    </div>
+  </div>
+
+  <div id="menu-death" class="menu red hidden">
+    <h1>You Died!</h1>
+    <div class="buttons">
+      <button id="btn-respawn" class="mc">Respawn</button>
+      <button id="btn-death-quit" class="mc">Title Screen</button>
+    </div>
+  </div>
+
+  <div id="fatal"></div>
+
+  <script type="module" src="js/game.js"></script>
+</body>
+</html>
